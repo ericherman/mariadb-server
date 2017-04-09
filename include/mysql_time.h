@@ -19,13 +19,13 @@
 
 /*
   Portable time_t replacement.
-  Should be signed and hold seconds for 1902 -- 2038-01-19 range
-  i.e at least a 32bit variable
+  Should be signed and hold seconds for 1902 -- 9999 range
+  i.e at least a 64bit variable
 
   Using the system built in time_t is not an option as
   we rely on the above requirements in the time functions   
 */
-typedef long my_time_t;
+typedef long long my_time_t;
 
 
 /*
