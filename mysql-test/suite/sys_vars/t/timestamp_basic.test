@@ -141,6 +141,10 @@ SELECT session.timestamp;
 --Error ER_BAD_FIELD_ERROR
 SELECT timestamp = @@session.timestamp;
 
+# 2112-04-01 01:02:03 (UTC)
+SET timestamp = 4488915723;
+SELECT @@timestamp;
+
 ##############################  
 #   Restore initial value    #
 ##############################

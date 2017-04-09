@@ -32,7 +32,7 @@ Warnings:
 Warning	1292	Truncated incorrect timestamp value: '1e22'
 SELECT @@timestamp;
 @@timestamp
-2147483647.000000
+253370764800.000000
 '#--------------------FN_DYNVARS_001_04-------------------------#'
 SET @@timestamp = "100";
 ERROR 42000: Incorrect argument type to variable 'timestamp'
@@ -69,4 +69,8 @@ SELECT session.timestamp;
 ERROR 42S02: Unknown table 'session' in field list
 SELECT timestamp = @@session.timestamp;
 ERROR 42S22: Unknown column 'timestamp' in 'field list'
+SET timestamp = 4488915723;
+SELECT @@timestamp;
+@@timestamp
+4488915723.000000
 SET @@timestamp = @session_start_value;
