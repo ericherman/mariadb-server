@@ -35,9 +35,11 @@ extern uchar days_in_month[];
 #define MY_TIME_T_MIN LONG_MIN
 
 /* Time handling defaults */
-#define TIMESTAMP_MAX_YEAR 2038
+#define TIMESTAMP_MAX_YEAR 9999
 #define TIMESTAMP_MIN_YEAR (1900 + YY_PART_YEAR - 1)
-#define TIMESTAMP_MAX_VALUE INT_MAX32
+
+/* 253370764800 = 9999-01-01 */
+#define TIMESTAMP_MAX_VALUE 253370764800LL
 #define TIMESTAMP_MIN_VALUE 0
 
 /* two-digit years < this are 20..; >= this are 19.. */
