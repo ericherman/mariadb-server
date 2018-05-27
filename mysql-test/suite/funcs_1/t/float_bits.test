@@ -1,0 +1,2190 @@
+###################################################
+#                                                 #
+#  Demonstrates the use of data interchange       #
+#  functions for exchanging floating-point values #
+#                                                 #
+#  Also demonstrates the use where floating point #
+#  comparisions act in surprising ways.           #
+#                                                 #
+###################################################
+
+SELECT float_to_int32_bits(1.0);
+SELECT int32_bits_to_float(1065353216);
+
+SELECT float_to_int32_bits(-12.5);
+SELECT int32_bits_to_float(-1052246016);
+
+SELECT double_to_int64_bits(1.0);
+SELECT int64_bits_to_double(4607182418800017408);
+
+SELECT double_to_int64_bits(-12.5);
+SELECT int64_bits_to_double(13846598529327300608);
+
+CREATE TABLE t1
+(
+  id int,
+  d double,
+  PRIMARY KEY (id)
+);
+INSERT INTO t1 VALUES (1, 0.671437), (2, -1.5);
+SELECT id, d FROM t1;
+
+# with double-precision floating point (64 bit)
+# we get the results we asked for every time:
+SELECT id, d FROM t1 WHERE d = 0.671437;
+SELECT id, d FROM t1 WHERE d = -1.5;
+
+CREATE TABLE t2
+(
+  id int,
+  f float,
+  PRIMARY KEY (id)
+);
+INSERT INTO t2 VALUES (1, 0.671437), (2, -1.5);
+SELECT id,f FROM t2;
+
+# with single-precision float (32 bit)
+# we DO NOT get the results we asked for every time,
+# just sometimes:
+SELECT id, f FROM t2 WHERE f = 0.671437;
+SELECT id, f FROM t2 WHERE f = -1.5;
+
+# with interchange values, we can get what we expect:
+SELECT id, f FROM t2
+WHERE float_to_int32_bits(f) = float_to_int32_bits(0.671437);
+
+SELECT id, f FROM t2
+WHERE float_to_int32_bits(f) = float_to_int32_bits(-1.5);
+
+# now lets look at some odd values for double-precision
+INSERT INTO t1 VALUES
+(3, NULL),
+(4, 0),
+(5,  1.7976931348623157E+308),
+(6, -1.7976931348623157E+308),
+(7,  2.2250738585072014E-308),
+(8, -2.2250738585072014E-308);
+
+SELECT	id,
+	d,
+	double_to_int64_bits(d),
+	int64_bits_to_double(double_to_int64_bits(d)),
+	d = int64_bits_to_double(double_to_int64_bits(d))
+FROM t1;
+
+# demonstrate sign flexibility:
+SELECT int32_bits_to_float(2222222222);
+SELECT int32_bits_to_float(-2072745074);
+SELECT int64_bits_to_double(9999999999999999999);
+SELECT int64_bits_to_double(-8446744073709551617);
+
+# demonstrate data type guarding
+CREATE TABLE g1 (g POINT);
+INSERT INTO g1 VALUES (PointFromText('POINT(10 10)'));
+--error ER_ILLEGAL_PARAMETER_DATA_TYPE_FOR_OPERATION
+SELECT int32_bits_to_float(g) FROM g1;
+--error ER_ILLEGAL_PARAMETER_DATA_TYPE_FOR_OPERATION
+SELECT int64_bits_to_double(g) FROM g1;
+
+# now lets look at some odd values for single-precision
+INSERT INTO t2 VALUES
+(3, NULL),
+(4, 0),
+(5,  3.402823466E+38),
+(6, -3.402823466E+38),
+(7,  1.175494351E-38),
+(8, -1.175494351E-38);
+
+SELECT	id,
+	f,
+	double_to_int64_bits(f),
+	int64_bits_to_double(double_to_int64_bits(f)),
+	f = int64_bits_to_double(double_to_int64_bits(f))
+FROM t2;
+
+
+# test round-tripping values across the signed 32bit range
+# we expect that +/-NAN and +/-INF will result in NULL
+CREATE TABLE t3 (
+i int,
+i2f float,
+i2f2i int,
+s varchar(255),
+s2f float,
+i2f2iei int
+);
+
+SELECT -2147483647,
+	int32_bits_to_float(-2147483647),
+	  float_to_int32_bits(int32_bits_to_float(-2147483647)),
+	'-1.401298464324817070924e-45',
+	-1.401298464324817070924e-45,
+	-2147483647 = float_to_int32_bits(int32_bits_to_float(-2147483647));
+
+INSERT INTO t3 VALUES(-2147483647,
+	int32_bits_to_float(-2147483647),
+	/* float_to_int32_bits(int32_bits_to_float(-2147483647)), */
+	float_to_int32_bits(-1.401298464324817070924e-45),
+	'-1.401298464324817070924e-45',
+	NULL /* -1.401298464324817070924e-45 */,
+	NULL /* -2147483647 = float_to_int32_bits(int32_bits_to_float(-2147483647)) */);
+SELECT * FROM t3 WHERE i = -2147483647;
+#### 
+#### INSERT INTO t3 VALUES(-2147483646,
+#### 	int32_bits_to_float(-2147483646),
+#### 	float_to_int32_bits(int32_bits_to_float(-2147483646)),
+#### 	'-2.802596928649634141847e-45',
+#### 	-2.802596928649634141847e-45,
+#### 	-2147483646 = float_to_int32_bits(int32_bits_to_float(-2147483646)));
+#### SELECT * FROM t3 WHERE i = -2147483646;
+#### 
+#### INSERT INTO t3 VALUES(-2143289345,
+#### 	int32_bits_to_float(-2143289345),
+#### 	float_to_int32_bits(int32_bits_to_float(-2143289345)),
+#### 	'-5.877470352812973215027e-39',
+#### 	-5.877470352812973215027e-39,
+#### 	-2143289345 = float_to_int32_bits(int32_bits_to_float(-2143289345)));
+#### SELECT * FROM t3 WHERE i = -2143289345;
+#### 
+#### INSERT INTO t3 VALUES(-2143289344,
+#### 	int32_bits_to_float(-2143289344),
+#### 	float_to_int32_bits(int32_bits_to_float(-2143289344)),
+#### 	'-5.877471754111437539844e-39',
+#### 	-5.877471754111437539844e-39,
+#### 	-2143289344 = float_to_int32_bits(int32_bits_to_float(-2143289344)));
+#### SELECT * FROM t3 WHERE i = -2143289344;
+#### 
+#### INSERT INTO t3 VALUES(-2143289343,
+#### 	int32_bits_to_float(-2143289343),
+#### 	float_to_int32_bits(int32_bits_to_float(-2143289343)),
+#### 	'-5.877473155409901864661e-39',
+#### 	-5.877473155409901864661e-39,
+#### 	-2143289343 = float_to_int32_bits(int32_bits_to_float(-2143289343)));
+#### SELECT * FROM t3 WHERE i = -2143289343;
+#### 
+#### INSERT INTO t3 VALUES(-2143289342,
+#### 	int32_bits_to_float(-2143289342),
+#### 	float_to_int32_bits(int32_bits_to_float(-2143289342)),
+#### 	'-5.877474556708366189478e-39',
+#### 	-5.877474556708366189478e-39,
+#### 	-2143289342 = float_to_int32_bits(int32_bits_to_float(-2143289342)));
+#### SELECT * FROM t3 WHERE i = -2143289342;
+#### 
+#### INSERT INTO t3 VALUES(-2139095041,
+#### 	int32_bits_to_float(-2139095041),
+#### 	float_to_int32_bits(int32_bits_to_float(-2139095041)),
+#### 	'-1.175494210692441075487e-38',
+#### 	-1.175494210692441075487e-38,
+#### 	-2139095041 = float_to_int32_bits(int32_bits_to_float(-2139095041)));
+#### SELECT * FROM t3 WHERE i = -2139095041;
+#### 
+#### INSERT INTO t3 VALUES(-2139095040,
+#### 	int32_bits_to_float(-2139095040),
+#### 	float_to_int32_bits(int32_bits_to_float(-2139095040)),
+#### 	'-1.175494350822287507969e-38',
+#### 	-1.175494350822287507969e-38,
+#### 	-2139095040 = float_to_int32_bits(int32_bits_to_float(-2139095040)));
+#### SELECT * FROM t3 WHERE i = -2139095040;
+#### 
+#### INSERT INTO t3 VALUES(-2139095039,
+#### 	int32_bits_to_float(-2139095039),
+#### 	float_to_int32_bits(int32_bits_to_float(-2139095039)),
+#### 	'-1.175494490952133940450e-38',
+#### 	-1.175494490952133940450e-38,
+#### 	-2139095039 = float_to_int32_bits(int32_bits_to_float(-2139095039)));
+#### SELECT * FROM t3 WHERE i = -2139095039;
+#### 
+#### INSERT INTO t3 VALUES(-2139095038,
+#### 	int32_bits_to_float(-2139095038),
+#### 	float_to_int32_bits(int32_bits_to_float(-2139095038)),
+#### 	'-1.175494631081980372932e-38',
+#### 	-1.175494631081980372932e-38,
+#### 	-2139095038 = float_to_int32_bits(int32_bits_to_float(-2139095038)));
+#### SELECT * FROM t3 WHERE i = -2139095038;
+#### 
+#### INSERT INTO t3 VALUES(-2134900737,
+#### 	int32_bits_to_float(-2134900737),
+#### 	float_to_int32_bits(int32_bits_to_float(-2134900737)),
+#### 	'-1.763241386103584829471e-38',
+#### 	-1.763241386103584829471e-38,
+#### 	-2134900737 = float_to_int32_bits(int32_bits_to_float(-2134900737)));
+#### SELECT * FROM t3 WHERE i = -2134900737;
+#### 
+#### INSERT INTO t3 VALUES(-2134900736,
+#### 	int32_bits_to_float(-2134900736),
+#### 	float_to_int32_bits(int32_bits_to_float(-2134900736)),
+#### 	'-1.763241526233431261953e-38',
+#### 	-1.763241526233431261953e-38,
+#### 	-2134900736 = float_to_int32_bits(int32_bits_to_float(-2134900736)));
+#### SELECT * FROM t3 WHERE i = -2134900736;
+#### 
+#### INSERT INTO t3 VALUES(-2134900735,
+#### 	int32_bits_to_float(-2134900735),
+#### 	float_to_int32_bits(int32_bits_to_float(-2134900735)),
+#### 	'-1.763241666363277694435e-38',
+#### 	-1.763241666363277694435e-38,
+#### 	-2134900735 = float_to_int32_bits(int32_bits_to_float(-2134900735)));
+#### SELECT * FROM t3 WHERE i = -2134900735;
+#### 
+#### INSERT INTO t3 VALUES(-2134900734,
+#### 	int32_bits_to_float(-2134900734),
+#### 	float_to_int32_bits(int32_bits_to_float(-2134900734)),
+#### 	'-1.763241806493124126917e-38',
+#### 	-1.763241806493124126917e-38,
+#### 	-2134900734 = float_to_int32_bits(int32_bits_to_float(-2134900734)));
+#### SELECT * FROM t3 WHERE i = -2134900734;
+#### 
+#### INSERT INTO t3 VALUES(-2130706433,
+#### 	int32_bits_to_float(-2130706433),
+#### 	float_to_int32_bits(int32_bits_to_float(-2130706433)),
+#### 	'-2.350988561514728583456e-38',
+#### 	-2.350988561514728583456e-38,
+#### 	-2130706433 = float_to_int32_bits(int32_bits_to_float(-2130706433)));
+#### SELECT * FROM t3 WHERE i = -2130706433;
+#### 
+#### INSERT INTO t3 VALUES(-2130706432,
+#### 	int32_bits_to_float(-2130706432),
+#### 	float_to_int32_bits(int32_bits_to_float(-2130706432)),
+#### 	'-2.350988701644575015937e-38',
+#### 	-2.350988701644575015937e-38,
+#### 	-2130706432 = float_to_int32_bits(int32_bits_to_float(-2130706432)));
+#### SELECT * FROM t3 WHERE i = -2130706432;
+#### 
+#### INSERT INTO t3 VALUES(-1090519039,
+#### 	int32_bits_to_float(-1090519039),
+#### 	float_to_int32_bits(int32_bits_to_float(-1090519039)),
+#### 	'-5.000000596046447753906e-01',
+#### 	-5.000000596046447753906e-01,
+#### 	-1090519039 = float_to_int32_bits(int32_bits_to_float(-1090519039)));
+#### SELECT * FROM t3 WHERE i = -1090519039;
+#### 
+#### INSERT INTO t3 VALUES(-1090519038,
+#### 	int32_bits_to_float(-1090519038),
+#### 	float_to_int32_bits(int32_bits_to_float(-1090519038)),
+#### 	'-5.000001192092895507812e-01',
+#### 	-5.000001192092895507812e-01,
+#### 	-1090519038 = float_to_int32_bits(int32_bits_to_float(-1090519038)));
+#### SELECT * FROM t3 WHERE i = -1090519038;
+#### 
+#### INSERT INTO t3 VALUES(-1086324737,
+#### 	int32_bits_to_float(-1086324737),
+#### 	float_to_int32_bits(int32_bits_to_float(-1086324737)),
+#### 	'-7.499999403953552246094e-01',
+#### 	-7.499999403953552246094e-01,
+#### 	-1086324737 = float_to_int32_bits(int32_bits_to_float(-1086324737)));
+#### SELECT * FROM t3 WHERE i = -1086324737;
+#### 
+#### INSERT INTO t3 VALUES(-1086324736,
+#### 	int32_bits_to_float(-1086324736),
+#### 	float_to_int32_bits(int32_bits_to_float(-1086324736)),
+#### 	'-7.500000000000000000000e-01',
+#### 	-7.500000000000000000000e-01,
+#### 	-1086324736 = float_to_int32_bits(int32_bits_to_float(-1086324736)));
+#### SELECT * FROM t3 WHERE i = -1086324736;
+#### 
+#### INSERT INTO t3 VALUES(-1086324735,
+#### 	int32_bits_to_float(-1086324735),
+#### 	float_to_int32_bits(int32_bits_to_float(-1086324735)),
+#### 	'-7.500000596046447753906e-01',
+#### 	-7.500000596046447753906e-01,
+#### 	-1086324735 = float_to_int32_bits(int32_bits_to_float(-1086324735)));
+#### SELECT * FROM t3 WHERE i = -1086324735;
+#### 
+#### INSERT INTO t3 VALUES(-1086324734,
+#### 	int32_bits_to_float(-1086324734),
+#### 	float_to_int32_bits(int32_bits_to_float(-1086324734)),
+#### 	'-7.500001192092895507812e-01',
+#### 	-7.500001192092895507812e-01,
+#### 	-1086324734 = float_to_int32_bits(int32_bits_to_float(-1086324734)));
+#### SELECT * FROM t3 WHERE i = -1086324734;
+#### 
+#### INSERT INTO t3 VALUES(-1082130433,
+#### 	int32_bits_to_float(-1082130433),
+#### 	float_to_int32_bits(int32_bits_to_float(-1082130433)),
+#### 	'-9.999999403953552246094e-01',
+#### 	-9.999999403953552246094e-01,
+#### 	-1082130433 = float_to_int32_bits(int32_bits_to_float(-1082130433)));
+#### SELECT * FROM t3 WHERE i = -1082130433;
+#### 
+#### INSERT INTO t3 VALUES(-1082130432,
+#### 	int32_bits_to_float(-1082130432),
+#### 	float_to_int32_bits(int32_bits_to_float(-1082130432)),
+#### 	'-1.000000000000000000000e+00',
+#### 	-1.000000000000000000000e+00,
+#### 	-1082130432 = float_to_int32_bits(int32_bits_to_float(-1082130432)));
+#### SELECT * FROM t3 WHERE i = -1082130432;
+#### 
+#### INSERT INTO t3 VALUES(-1082130431,
+#### 	int32_bits_to_float(-1082130431),
+#### 	float_to_int32_bits(int32_bits_to_float(-1082130431)),
+#### 	'-1.000000119209289550781e+00',
+#### 	-1.000000119209289550781e+00,
+#### 	-1082130431 = float_to_int32_bits(int32_bits_to_float(-1082130431)));
+#### SELECT * FROM t3 WHERE i = -1082130431;
+#### 
+#### INSERT INTO t3 VALUES(-1082130430,
+#### 	int32_bits_to_float(-1082130430),
+#### 	float_to_int32_bits(int32_bits_to_float(-1082130430)),
+#### 	'-1.000000238418579101562e+00',
+#### 	-1.000000238418579101562e+00,
+#### 	-1082130430 = float_to_int32_bits(int32_bits_to_float(-1082130430)));
+#### SELECT * FROM t3 WHERE i = -1082130430;
+#### 
+#### INSERT INTO t3 VALUES(-1077936129,
+#### 	int32_bits_to_float(-1077936129),
+#### 	float_to_int32_bits(int32_bits_to_float(-1077936129)),
+#### 	'-1.499999880790710449219e+00',
+#### 	-1.499999880790710449219e+00,
+#### 	-1077936129 = float_to_int32_bits(int32_bits_to_float(-1077936129)));
+#### SELECT * FROM t3 WHERE i = -1077936129;
+#### 
+#### INSERT INTO t3 VALUES(-1077936128,
+#### 	int32_bits_to_float(-1077936128),
+#### 	float_to_int32_bits(int32_bits_to_float(-1077936128)),
+#### 	'-1.500000000000000000000e+00',
+#### 	-1.500000000000000000000e+00,
+#### 	-1077936128 = float_to_int32_bits(int32_bits_to_float(-1077936128)));
+#### SELECT * FROM t3 WHERE i = -1077936128;
+#### 
+#### INSERT INTO t3 VALUES(-1077936127,
+#### 	int32_bits_to_float(-1077936127),
+#### 	float_to_int32_bits(int32_bits_to_float(-1077936127)),
+#### 	'-1.500000119209289550781e+00',
+#### 	-1.500000119209289550781e+00,
+#### 	-1077936127 = float_to_int32_bits(int32_bits_to_float(-1077936127)));
+#### SELECT * FROM t3 WHERE i = -1077936127;
+#### 
+#### INSERT INTO t3 VALUES(-1077936126,
+#### 	int32_bits_to_float(-1077936126),
+#### 	float_to_int32_bits(int32_bits_to_float(-1077936126)),
+#### 	'-1.500000238418579101562e+00',
+#### 	-1.500000238418579101562e+00,
+#### 	-1077936126 = float_to_int32_bits(int32_bits_to_float(-1077936126)));
+#### SELECT * FROM t3 WHERE i = -1077936126;
+#### 
+#### INSERT INTO t3 VALUES(-1073741825,
+#### 	int32_bits_to_float(-1073741825),
+#### 	float_to_int32_bits(int32_bits_to_float(-1073741825)),
+#### 	'-1.999999880790710449219e+00',
+#### 	-1.999999880790710449219e+00,
+#### 	-1073741825 = float_to_int32_bits(int32_bits_to_float(-1073741825)));
+#### SELECT * FROM t3 WHERE i = -1073741825;
+#### 
+#### INSERT INTO t3 VALUES(-1073741824,
+#### 	int32_bits_to_float(-1073741824),
+#### 	float_to_int32_bits(int32_bits_to_float(-1073741824)),
+#### 	'-2.000000000000000000000e+00',
+#### 	-2.000000000000000000000e+00,
+#### 	-1073741824 = float_to_int32_bits(int32_bits_to_float(-1073741824)));
+#### SELECT * FROM t3 WHERE i = -1073741824;
+#### 
+#### INSERT INTO t3 VALUES(-1073741823,
+#### 	int32_bits_to_float(-1073741823),
+#### 	float_to_int32_bits(int32_bits_to_float(-1073741823)),
+#### 	'-2.000000238418579101562e+00',
+#### 	-2.000000238418579101562e+00,
+#### 	-1073741823 = float_to_int32_bits(int32_bits_to_float(-1073741823)));
+#### SELECT * FROM t3 WHERE i = -1073741823;
+#### 
+#### INSERT INTO t3 VALUES(-1073741822,
+#### 	int32_bits_to_float(-1073741822),
+#### 	float_to_int32_bits(int32_bits_to_float(-1073741822)),
+#### 	'-2.000000476837158203125e+00',
+#### 	-2.000000476837158203125e+00,
+#### 	-1073741822 = float_to_int32_bits(int32_bits_to_float(-1073741822)));
+#### SELECT * FROM t3 WHERE i = -1073741822;
+#### 
+#### INSERT INTO t3 VALUES(-1069547521,
+#### 	int32_bits_to_float(-1069547521),
+#### 	float_to_int32_bits(int32_bits_to_float(-1069547521)),
+#### 	'-2.999999761581420898438e+00',
+#### 	-2.999999761581420898438e+00,
+#### 	-1069547521 = float_to_int32_bits(int32_bits_to_float(-1069547521)));
+#### SELECT * FROM t3 WHERE i = -1069547521;
+#### 
+#### INSERT INTO t3 VALUES(-1069547520,
+#### 	int32_bits_to_float(-1069547520),
+#### 	float_to_int32_bits(int32_bits_to_float(-1069547520)),
+#### 	'-3.000000000000000000000e+00',
+#### 	-3.000000000000000000000e+00,
+#### 	-1069547520 = float_to_int32_bits(int32_bits_to_float(-1069547520)));
+#### SELECT * FROM t3 WHERE i = -1069547520;
+#### 
+#### INSERT INTO t3 VALUES(-1069547519,
+#### 	int32_bits_to_float(-1069547519),
+#### 	float_to_int32_bits(int32_bits_to_float(-1069547519)),
+#### 	'-3.000000238418579101562e+00',
+#### 	-3.000000238418579101562e+00,
+#### 	-1069547519 = float_to_int32_bits(int32_bits_to_float(-1069547519)));
+#### SELECT * FROM t3 WHERE i = -1069547519;
+#### 
+#### INSERT INTO t3 VALUES(-1069547518,
+#### 	int32_bits_to_float(-1069547518),
+#### 	float_to_int32_bits(int32_bits_to_float(-1069547518)),
+#### 	'-3.000000476837158203125e+00',
+#### 	-3.000000476837158203125e+00,
+#### 	-1069547518 = float_to_int32_bits(int32_bits_to_float(-1069547518)));
+#### SELECT * FROM t3 WHERE i = -1069547518;
+#### 
+#### INSERT INTO t3 VALUES(-1065353217,
+#### 	int32_bits_to_float(-1065353217),
+#### 	float_to_int32_bits(int32_bits_to_float(-1065353217)),
+#### 	'-3.999999761581420898438e+00',
+#### 	-3.999999761581420898438e+00,
+#### 	-1065353217 = float_to_int32_bits(int32_bits_to_float(-1065353217)));
+#### SELECT * FROM t3 WHERE i = -1065353217;
+#### 
+#### INSERT INTO t3 VALUES(-1065353216,
+#### 	int32_bits_to_float(-1065353216),
+#### 	float_to_int32_bits(int32_bits_to_float(-1065353216)),
+#### 	'-4.000000000000000000000e+00',
+#### 	-4.000000000000000000000e+00,
+#### 	-1065353216 = float_to_int32_bits(int32_bits_to_float(-1065353216)));
+#### SELECT * FROM t3 WHERE i = -1065353216;
+#### 
+#### INSERT INTO t3 VALUES(-1065353215,
+#### 	int32_bits_to_float(-1065353215),
+#### 	float_to_int32_bits(int32_bits_to_float(-1065353215)),
+#### 	'-4.000000476837158203125e+00',
+#### 	-4.000000476837158203125e+00,
+#### 	-1065353215 = float_to_int32_bits(int32_bits_to_float(-1065353215)));
+#### SELECT * FROM t3 WHERE i = -1065353215;
+#### 
+#### INSERT INTO t3 VALUES(-1065353214,
+#### 	int32_bits_to_float(-1065353214),
+#### 	float_to_int32_bits(int32_bits_to_float(-1065353214)),
+#### 	'-4.000000953674316406250e+00',
+#### 	-4.000000953674316406250e+00,
+#### 	-1065353214 = float_to_int32_bits(int32_bits_to_float(-1065353214)));
+#### SELECT * FROM t3 WHERE i = -1065353214;
+#### 
+#### INSERT INTO t3 VALUES(-1061158913,
+#### 	int32_bits_to_float(-1061158913),
+#### 	float_to_int32_bits(int32_bits_to_float(-1061158913)),
+#### 	'-5.999999523162841796875e+00',
+#### 	-5.999999523162841796875e+00,
+#### 	-1061158913 = float_to_int32_bits(int32_bits_to_float(-1061158913)));
+#### SELECT * FROM t3 WHERE i = -1061158913;
+#### 
+#### INSERT INTO t3 VALUES(-1061158912,
+#### 	int32_bits_to_float(-1061158912),
+#### 	float_to_int32_bits(int32_bits_to_float(-1061158912)),
+#### 	'-6.000000000000000000000e+00',
+#### 	-6.000000000000000000000e+00,
+#### 	-1061158912 = float_to_int32_bits(int32_bits_to_float(-1061158912)));
+#### SELECT * FROM t3 WHERE i = -1061158912;
+#### 
+#### INSERT INTO t3 VALUES(-1061158911,
+#### 	int32_bits_to_float(-1061158911),
+#### 	float_to_int32_bits(int32_bits_to_float(-1061158911)),
+#### 	'-6.000000476837158203125e+00',
+#### 	-6.000000476837158203125e+00,
+#### 	-1061158911 = float_to_int32_bits(int32_bits_to_float(-1061158911)));
+#### SELECT * FROM t3 WHERE i = -1061158911;
+#### 
+#### INSERT INTO t3 VALUES(-1061158910,
+#### 	int32_bits_to_float(-1061158910),
+#### 	float_to_int32_bits(int32_bits_to_float(-1061158910)),
+#### 	'-6.000000953674316406250e+00',
+#### 	-6.000000953674316406250e+00,
+#### 	-1061158910 = float_to_int32_bits(int32_bits_to_float(-1061158910)));
+#### SELECT * FROM t3 WHERE i = -1061158910;
+#### 
+#### INSERT INTO t3 VALUES(-1056964609,
+#### 	int32_bits_to_float(-1056964609),
+#### 	float_to_int32_bits(int32_bits_to_float(-1056964609)),
+#### 	'-7.999999523162841796875e+00',
+#### 	-7.999999523162841796875e+00,
+#### 	-1056964609 = float_to_int32_bits(int32_bits_to_float(-1056964609)));
+#### SELECT * FROM t3 WHERE i = -1056964609;
+#### 
+#### INSERT INTO t3 VALUES(-1056964608,
+#### 	int32_bits_to_float(-1056964608),
+#### 	float_to_int32_bits(int32_bits_to_float(-1056964608)),
+#### 	'-8.000000000000000000000e+00',
+#### 	-8.000000000000000000000e+00,
+#### 	-1056964608 = float_to_int32_bits(int32_bits_to_float(-1056964608)));
+#### SELECT * FROM t3 WHERE i = -1056964608;
+#### 
+#### INSERT INTO t3 VALUES(-16777215,
+#### 	int32_bits_to_float(-16777215),
+#### 	float_to_int32_bits(int32_bits_to_float(-16777215)),
+#### 	'-1.701412037428788353834e+38',
+#### 	-1.701412037428788353834e+38,
+#### 	-16777215 = float_to_int32_bits(int32_bits_to_float(-16777215)));
+#### SELECT * FROM t3 WHERE i = -16777215;
+#### 
+#### INSERT INTO t3 VALUES(-16777214,
+#### 	int32_bits_to_float(-16777214),
+#### 	float_to_int32_bits(int32_bits_to_float(-16777214)),
+#### 	'-1.701412240252884390350e+38',
+#### 	-1.701412240252884390350e+38,
+#### 	-16777214 = float_to_int32_bits(int32_bits_to_float(-16777214)));
+#### SELECT * FROM t3 WHERE i = -16777214;
+#### 
+#### INSERT INTO t3 VALUES(-12582913,
+#### 	int32_bits_to_float(-12582913),
+#### 	float_to_int32_bits(int32_bits_to_float(-12582913)),
+#### 	'-2.552117549082942439459e+38',
+#### 	-2.552117549082942439459e+38,
+#### 	-12582913 = float_to_int32_bits(int32_bits_to_float(-12582913)));
+#### SELECT * FROM t3 WHERE i = -12582913;
+#### 
+#### INSERT INTO t3 VALUES(-12582912,
+#### 	int32_bits_to_float(-12582912),
+#### 	float_to_int32_bits(int32_bits_to_float(-12582912)),
+#### 	'-2.552117751907038475975e+38',
+#### 	-2.552117751907038475975e+38,
+#### 	-12582912 = float_to_int32_bits(int32_bits_to_float(-12582912)));
+#### SELECT * FROM t3 WHERE i = -12582912;
+#### 
+#### INSERT INTO t3 VALUES(-12582911,
+#### 	int32_bits_to_float(-12582911),
+#### 	float_to_int32_bits(int32_bits_to_float(-12582911)),
+#### 	'-2.552117954731134512492e+38',
+#### 	-2.552117954731134512492e+38,
+#### 	-12582911 = float_to_int32_bits(int32_bits_to_float(-12582911)));
+#### SELECT * FROM t3 WHERE i = -12582911;
+#### 
+#### INSERT INTO t3 VALUES(-12582910,
+#### 	int32_bits_to_float(-12582910),
+#### 	float_to_int32_bits(int32_bits_to_float(-12582910)),
+#### 	'-2.552118157555230549009e+38',
+#### 	-2.552118157555230549009e+38,
+#### 	-12582910 = float_to_int32_bits(int32_bits_to_float(-12582910)));
+#### SELECT * FROM t3 WHERE i = -12582910;
+#### 
+#### INSERT INTO t3 VALUES(-8388609,
+#### 	int32_bits_to_float(-8388609),
+#### 	float_to_int32_bits(int32_bits_to_float(-8388609)),
+#### 	'-3.402823466385288598117e+38',
+#### 	-3.402823466385288598117e+38,
+#### 	-8388609 = float_to_int32_bits(int32_bits_to_float(-8388609)));
+#### SELECT * FROM t3 WHERE i = -8388609;
+#### 
+#### INSERT INTO t3 VALUES(-8388608,
+#### 	int32_bits_to_float(-8388608),
+#### 	float_to_int32_bits(int32_bits_to_float(-8388608)),
+#### 	'-inf',
+#### 	-inf,
+#### 	-8388608 = float_to_int32_bits(int32_bits_to_float(-8388608)));
+#### SELECT * FROM t3 WHERE i = -8388608;
+#### 
+#### INSERT INTO t3 VALUES(-8388607,
+#### 	int32_bits_to_float(-8388607),
+#### 	float_to_int32_bits(int32_bits_to_float(-8388607)),
+#### 	'-nan',
+#### 	-nan,
+#### 	-8388607 = float_to_int32_bits(int32_bits_to_float(-8388607)));
+#### SELECT * FROM t3 WHERE i = -8388607;
+#### 
+#### INSERT INTO t3 VALUES(-8388606,
+#### 	int32_bits_to_float(-8388606),
+#### 	float_to_int32_bits(int32_bits_to_float(-8388606)),
+#### 	'-nan',
+#### 	-nan,
+#### 	-8388606 = float_to_int32_bits(int32_bits_to_float(-8388606)));
+#### SELECT * FROM t3 WHERE i = -8388606;
+#### 
+#### INSERT INTO t3 VALUES(-4194305,
+#### 	int32_bits_to_float(-4194305),
+#### 	float_to_int32_bits(int32_bits_to_float(-4194305)),
+#### 	'-nan',
+#### 	-nan,
+#### 	-4194305 = float_to_int32_bits(int32_bits_to_float(-4194305)));
+#### SELECT * FROM t3 WHERE i = -4194305;
+#### 
+#### INSERT INTO t3 VALUES(-4194304,
+#### 	int32_bits_to_float(-4194304),
+#### 	float_to_int32_bits(int32_bits_to_float(-4194304)),
+#### 	'-nan',
+#### 	-nan,
+#### 	-4194304 = float_to_int32_bits(int32_bits_to_float(-4194304)));
+#### SELECT * FROM t3 WHERE i = -4194304;
+#### 
+#### INSERT INTO t3 VALUES(-4194303,
+#### 	int32_bits_to_float(-4194303),
+#### 	float_to_int32_bits(int32_bits_to_float(-4194303)),
+#### 	'-nan',
+#### 	-nan,
+#### 	-4194303 = float_to_int32_bits(int32_bits_to_float(-4194303)));
+#### SELECT * FROM t3 WHERE i = -4194303;
+#### 
+#### INSERT INTO t3 VALUES(-4194302,
+#### 	int32_bits_to_float(-4194302),
+#### 	float_to_int32_bits(int32_bits_to_float(-4194302)),
+#### 	'-nan',
+#### 	-nan,
+#### 	-4194302 = float_to_int32_bits(int32_bits_to_float(-4194302)));
+#### SELECT * FROM t3 WHERE i = -4194302;
+#### 
+#### INSERT INTO t3 VALUES(-1,
+#### 	int32_bits_to_float(-1),
+#### 	float_to_int32_bits(int32_bits_to_float(-1)),
+#### 	'-nan',
+#### 	-nan,
+#### 	-1 = float_to_int32_bits(int32_bits_to_float(-1)));
+#### SELECT * FROM t3 WHERE i = -1;
+#### 
+#### INSERT INTO t3 VALUES(0,
+#### 	int32_bits_to_float(0),
+#### 	float_to_int32_bits(int32_bits_to_float(0)),
+#### 	'0.000000000000000000000e+00',
+#### 	0.000000000000000000000e+00,
+#### 	0 = float_to_int32_bits(int32_bits_to_float(0)));
+#### SELECT * FROM t3 WHERE i = 0;
+#### 
+#### INSERT INTO t3 VALUES(0,
+#### 	int32_bits_to_float(0),
+#### 	float_to_int32_bits(int32_bits_to_float(0)),
+#### 	'0.000000000000000000000e+00',
+#### 	0.000000000000000000000e+00,
+#### 	0 = float_to_int32_bits(int32_bits_to_float(0)));
+#### SELECT * FROM t3 WHERE i = 0;
+#### 
+#### INSERT INTO t3 VALUES(1,
+#### 	int32_bits_to_float(1),
+#### 	float_to_int32_bits(int32_bits_to_float(1)),
+#### 	'1.401298464324817070924e-45',
+#### 	1.401298464324817070924e-45,
+#### 	1 = float_to_int32_bits(int32_bits_to_float(1)));
+#### SELECT * FROM t3 WHERE i = 1;
+#### 
+#### INSERT INTO t3 VALUES(4194302,
+#### 	int32_bits_to_float(4194302),
+#### 	float_to_int32_bits(int32_bits_to_float(4194302)),
+#### 	'5.877468951514508890210e-39',
+#### 	5.877468951514508890210e-39,
+#### 	4194302 = float_to_int32_bits(int32_bits_to_float(4194302)));
+#### SELECT * FROM t3 WHERE i = 4194302;
+#### 
+#### INSERT INTO t3 VALUES(4194303,
+#### 	int32_bits_to_float(4194303),
+#### 	float_to_int32_bits(int32_bits_to_float(4194303)),
+#### 	'5.877470352812973215027e-39',
+#### 	5.877470352812973215027e-39,
+#### 	4194303 = float_to_int32_bits(int32_bits_to_float(4194303)));
+#### SELECT * FROM t3 WHERE i = 4194303;
+#### 
+#### INSERT INTO t3 VALUES(4194304,
+#### 	int32_bits_to_float(4194304),
+#### 	float_to_int32_bits(int32_bits_to_float(4194304)),
+#### 	'5.877471754111437539844e-39',
+#### 	5.877471754111437539844e-39,
+#### 	4194304 = float_to_int32_bits(int32_bits_to_float(4194304)));
+#### SELECT * FROM t3 WHERE i = 4194304;
+#### 
+#### INSERT INTO t3 VALUES(4194305,
+#### 	int32_bits_to_float(4194305),
+#### 	float_to_int32_bits(int32_bits_to_float(4194305)),
+#### 	'5.877473155409901864661e-39',
+#### 	5.877473155409901864661e-39,
+#### 	4194305 = float_to_int32_bits(int32_bits_to_float(4194305)));
+#### SELECT * FROM t3 WHERE i = 4194305;
+#### 
+#### INSERT INTO t3 VALUES(8388606,
+#### 	int32_bits_to_float(8388606),
+#### 	float_to_int32_bits(int32_bits_to_float(8388606)),
+#### 	'1.175494070562594643005e-38',
+#### 	1.175494070562594643005e-38,
+#### 	8388606 = float_to_int32_bits(int32_bits_to_float(8388606)));
+#### SELECT * FROM t3 WHERE i = 8388606;
+#### 
+#### INSERT INTO t3 VALUES(8388607,
+#### 	int32_bits_to_float(8388607),
+#### 	float_to_int32_bits(int32_bits_to_float(8388607)),
+#### 	'1.175494210692441075487e-38',
+#### 	1.175494210692441075487e-38,
+#### 	8388607 = float_to_int32_bits(int32_bits_to_float(8388607)));
+#### SELECT * FROM t3 WHERE i = 8388607;
+#### 
+#### INSERT INTO t3 VALUES(8388608,
+#### 	int32_bits_to_float(8388608),
+#### 	float_to_int32_bits(int32_bits_to_float(8388608)),
+#### 	'1.175494350822287507969e-38',
+#### 	1.175494350822287507969e-38,
+#### 	8388608 = float_to_int32_bits(int32_bits_to_float(8388608)));
+#### SELECT * FROM t3 WHERE i = 8388608;
+#### 
+#### INSERT INTO t3 VALUES(8388609,
+#### 	int32_bits_to_float(8388609),
+#### 	float_to_int32_bits(int32_bits_to_float(8388609)),
+#### 	'1.175494490952133940450e-38',
+#### 	1.175494490952133940450e-38,
+#### 	8388609 = float_to_int32_bits(int32_bits_to_float(8388609)));
+#### SELECT * FROM t3 WHERE i = 8388609;
+#### 
+#### INSERT INTO t3 VALUES(12582910,
+#### 	int32_bits_to_float(12582910),
+#### 	float_to_int32_bits(int32_bits_to_float(12582910)),
+#### 	'1.763241245973738396990e-38',
+#### 	1.763241245973738396990e-38,
+#### 	12582910 = float_to_int32_bits(int32_bits_to_float(12582910)));
+#### SELECT * FROM t3 WHERE i = 12582910;
+#### 
+#### INSERT INTO t3 VALUES(12582911,
+#### 	int32_bits_to_float(12582911),
+#### 	float_to_int32_bits(int32_bits_to_float(12582911)),
+#### 	'1.763241386103584829471e-38',
+#### 	1.763241386103584829471e-38,
+#### 	12582911 = float_to_int32_bits(int32_bits_to_float(12582911)));
+#### SELECT * FROM t3 WHERE i = 12582911;
+#### 
+#### INSERT INTO t3 VALUES(12582912,
+#### 	int32_bits_to_float(12582912),
+#### 	float_to_int32_bits(int32_bits_to_float(12582912)),
+#### 	'1.763241526233431261953e-38',
+#### 	1.763241526233431261953e-38,
+#### 	12582912 = float_to_int32_bits(int32_bits_to_float(12582912)));
+#### SELECT * FROM t3 WHERE i = 12582912;
+#### 
+#### INSERT INTO t3 VALUES(12582913,
+#### 	int32_bits_to_float(12582913),
+#### 	float_to_int32_bits(int32_bits_to_float(12582913)),
+#### 	'1.763241666363277694435e-38',
+#### 	1.763241666363277694435e-38,
+#### 	12582913 = float_to_int32_bits(int32_bits_to_float(12582913)));
+#### SELECT * FROM t3 WHERE i = 12582913;
+#### 
+#### INSERT INTO t3 VALUES(16777214,
+#### 	int32_bits_to_float(16777214),
+#### 	float_to_int32_bits(int32_bits_to_float(16777214)),
+#### 	'2.350988421384882150974e-38',
+#### 	2.350988421384882150974e-38,
+#### 	16777214 = float_to_int32_bits(int32_bits_to_float(16777214)));
+#### SELECT * FROM t3 WHERE i = 16777214;
+#### 
+#### INSERT INTO t3 VALUES(16777215,
+#### 	int32_bits_to_float(16777215),
+#### 	float_to_int32_bits(int32_bits_to_float(16777215)),
+#### 	'2.350988561514728583456e-38',
+#### 	2.350988561514728583456e-38,
+#### 	16777215 = float_to_int32_bits(int32_bits_to_float(16777215)));
+#### SELECT * FROM t3 WHERE i = 16777215;
+#### 
+#### INSERT INTO t3 VALUES(1056964608,
+#### 	int32_bits_to_float(1056964608),
+#### 	float_to_int32_bits(int32_bits_to_float(1056964608)),
+#### 	'5.000000000000000000000e-01',
+#### 	5.000000000000000000000e-01,
+#### 	1056964608 = float_to_int32_bits(int32_bits_to_float(1056964608)));
+#### SELECT * FROM t3 WHERE i = 1056964608;
+#### 
+#### INSERT INTO t3 VALUES(1056964609,
+#### 	int32_bits_to_float(1056964609),
+#### 	float_to_int32_bits(int32_bits_to_float(1056964609)),
+#### 	'5.000000596046447753906e-01',
+#### 	5.000000596046447753906e-01,
+#### 	1056964609 = float_to_int32_bits(int32_bits_to_float(1056964609)));
+#### SELECT * FROM t3 WHERE i = 1056964609;
+#### 
+#### INSERT INTO t3 VALUES(1061158910,
+#### 	int32_bits_to_float(1061158910),
+#### 	float_to_int32_bits(int32_bits_to_float(1061158910)),
+#### 	'7.499998807907104492188e-01',
+#### 	7.499998807907104492188e-01,
+#### 	1061158910 = float_to_int32_bits(int32_bits_to_float(1061158910)));
+#### SELECT * FROM t3 WHERE i = 1061158910;
+#### 
+#### INSERT INTO t3 VALUES(1061158911,
+#### 	int32_bits_to_float(1061158911),
+#### 	float_to_int32_bits(int32_bits_to_float(1061158911)),
+#### 	'7.499999403953552246094e-01',
+#### 	7.499999403953552246094e-01,
+#### 	1061158911 = float_to_int32_bits(int32_bits_to_float(1061158911)));
+#### SELECT * FROM t3 WHERE i = 1061158911;
+#### 
+#### INSERT INTO t3 VALUES(1061158912,
+#### 	int32_bits_to_float(1061158912),
+#### 	float_to_int32_bits(int32_bits_to_float(1061158912)),
+#### 	'7.500000000000000000000e-01',
+#### 	7.500000000000000000000e-01,
+#### 	1061158912 = float_to_int32_bits(int32_bits_to_float(1061158912)));
+#### SELECT * FROM t3 WHERE i = 1061158912;
+#### 
+#### INSERT INTO t3 VALUES(1061158913,
+#### 	int32_bits_to_float(1061158913),
+#### 	float_to_int32_bits(int32_bits_to_float(1061158913)),
+#### 	'7.500000596046447753906e-01',
+#### 	7.500000596046447753906e-01,
+#### 	1061158913 = float_to_int32_bits(int32_bits_to_float(1061158913)));
+#### SELECT * FROM t3 WHERE i = 1061158913;
+#### 
+#### INSERT INTO t3 VALUES(1065353214,
+#### 	int32_bits_to_float(1065353214),
+#### 	float_to_int32_bits(int32_bits_to_float(1065353214)),
+#### 	'9.999998807907104492188e-01',
+#### 	9.999998807907104492188e-01,
+#### 	1065353214 = float_to_int32_bits(int32_bits_to_float(1065353214)));
+#### SELECT * FROM t3 WHERE i = 1065353214;
+#### 
+#### INSERT INTO t3 VALUES(1065353215,
+#### 	int32_bits_to_float(1065353215),
+#### 	float_to_int32_bits(int32_bits_to_float(1065353215)),
+#### 	'9.999999403953552246094e-01',
+#### 	9.999999403953552246094e-01,
+#### 	1065353215 = float_to_int32_bits(int32_bits_to_float(1065353215)));
+#### SELECT * FROM t3 WHERE i = 1065353215;
+#### 
+#### INSERT INTO t3 VALUES(1065353216,
+#### 	int32_bits_to_float(1065353216),
+#### 	float_to_int32_bits(int32_bits_to_float(1065353216)),
+#### 	'1.000000000000000000000e+00',
+#### 	1.000000000000000000000e+00,
+#### 	1065353216 = float_to_int32_bits(int32_bits_to_float(1065353216)));
+#### SELECT * FROM t3 WHERE i = 1065353216;
+#### 
+#### INSERT INTO t3 VALUES(1065353217,
+#### 	int32_bits_to_float(1065353217),
+#### 	float_to_int32_bits(int32_bits_to_float(1065353217)),
+#### 	'1.000000119209289550781e+00',
+#### 	1.000000119209289550781e+00,
+#### 	1065353217 = float_to_int32_bits(int32_bits_to_float(1065353217)));
+#### SELECT * FROM t3 WHERE i = 1065353217;
+#### 
+#### INSERT INTO t3 VALUES(1069547518,
+#### 	int32_bits_to_float(1069547518),
+#### 	float_to_int32_bits(int32_bits_to_float(1069547518)),
+#### 	'1.499999761581420898438e+00',
+#### 	1.499999761581420898438e+00,
+#### 	1069547518 = float_to_int32_bits(int32_bits_to_float(1069547518)));
+#### SELECT * FROM t3 WHERE i = 1069547518;
+#### 
+#### INSERT INTO t3 VALUES(1069547519,
+#### 	int32_bits_to_float(1069547519),
+#### 	float_to_int32_bits(int32_bits_to_float(1069547519)),
+#### 	'1.499999880790710449219e+00',
+#### 	1.499999880790710449219e+00,
+#### 	1069547519 = float_to_int32_bits(int32_bits_to_float(1069547519)));
+#### SELECT * FROM t3 WHERE i = 1069547519;
+#### 
+#### INSERT INTO t3 VALUES(1069547520,
+#### 	int32_bits_to_float(1069547520),
+#### 	float_to_int32_bits(int32_bits_to_float(1069547520)),
+#### 	'1.500000000000000000000e+00',
+#### 	1.500000000000000000000e+00,
+#### 	1069547520 = float_to_int32_bits(int32_bits_to_float(1069547520)));
+#### SELECT * FROM t3 WHERE i = 1069547520;
+#### 
+#### INSERT INTO t3 VALUES(1069547521,
+#### 	int32_bits_to_float(1069547521),
+#### 	float_to_int32_bits(int32_bits_to_float(1069547521)),
+#### 	'1.500000119209289550781e+00',
+#### 	1.500000119209289550781e+00,
+#### 	1069547521 = float_to_int32_bits(int32_bits_to_float(1069547521)));
+#### SELECT * FROM t3 WHERE i = 1069547521;
+#### 
+#### INSERT INTO t3 VALUES(1073741822,
+#### 	int32_bits_to_float(1073741822),
+#### 	float_to_int32_bits(int32_bits_to_float(1073741822)),
+#### 	'1.999999761581420898438e+00',
+#### 	1.999999761581420898438e+00,
+#### 	1073741822 = float_to_int32_bits(int32_bits_to_float(1073741822)));
+#### SELECT * FROM t3 WHERE i = 1073741822;
+#### 
+#### INSERT INTO t3 VALUES(1073741823,
+#### 	int32_bits_to_float(1073741823),
+#### 	float_to_int32_bits(int32_bits_to_float(1073741823)),
+#### 	'1.999999880790710449219e+00',
+#### 	1.999999880790710449219e+00,
+#### 	1073741823 = float_to_int32_bits(int32_bits_to_float(1073741823)));
+#### SELECT * FROM t3 WHERE i = 1073741823;
+#### 
+#### INSERT INTO t3 VALUES(1073741824,
+#### 	int32_bits_to_float(1073741824),
+#### 	float_to_int32_bits(int32_bits_to_float(1073741824)),
+#### 	'2.000000000000000000000e+00',
+#### 	2.000000000000000000000e+00,
+#### 	1073741824 = float_to_int32_bits(int32_bits_to_float(1073741824)));
+#### SELECT * FROM t3 WHERE i = 1073741824;
+#### 
+#### INSERT INTO t3 VALUES(1073741825,
+#### 	int32_bits_to_float(1073741825),
+#### 	float_to_int32_bits(int32_bits_to_float(1073741825)),
+#### 	'2.000000238418579101562e+00',
+#### 	2.000000238418579101562e+00,
+#### 	1073741825 = float_to_int32_bits(int32_bits_to_float(1073741825)));
+#### SELECT * FROM t3 WHERE i = 1073741825;
+#### 
+#### INSERT INTO t3 VALUES(1077936126,
+#### 	int32_bits_to_float(1077936126),
+#### 	float_to_int32_bits(int32_bits_to_float(1077936126)),
+#### 	'2.999999523162841796875e+00',
+#### 	2.999999523162841796875e+00,
+#### 	1077936126 = float_to_int32_bits(int32_bits_to_float(1077936126)));
+#### SELECT * FROM t3 WHERE i = 1077936126;
+#### 
+#### INSERT INTO t3 VALUES(1077936127,
+#### 	int32_bits_to_float(1077936127),
+#### 	float_to_int32_bits(int32_bits_to_float(1077936127)),
+#### 	'2.999999761581420898438e+00',
+#### 	2.999999761581420898438e+00,
+#### 	1077936127 = float_to_int32_bits(int32_bits_to_float(1077936127)));
+#### SELECT * FROM t3 WHERE i = 1077936127;
+#### 
+#### INSERT INTO t3 VALUES(1077936128,
+#### 	int32_bits_to_float(1077936128),
+#### 	float_to_int32_bits(int32_bits_to_float(1077936128)),
+#### 	'3.000000000000000000000e+00',
+#### 	3.000000000000000000000e+00,
+#### 	1077936128 = float_to_int32_bits(int32_bits_to_float(1077936128)));
+#### SELECT * FROM t3 WHERE i = 1077936128;
+#### 
+#### INSERT INTO t3 VALUES(1077936129,
+#### 	int32_bits_to_float(1077936129),
+#### 	float_to_int32_bits(int32_bits_to_float(1077936129)),
+#### 	'3.000000238418579101562e+00',
+#### 	3.000000238418579101562e+00,
+#### 	1077936129 = float_to_int32_bits(int32_bits_to_float(1077936129)));
+#### SELECT * FROM t3 WHERE i = 1077936129;
+#### 
+#### INSERT INTO t3 VALUES(1082130430,
+#### 	int32_bits_to_float(1082130430),
+#### 	float_to_int32_bits(int32_bits_to_float(1082130430)),
+#### 	'3.999999523162841796875e+00',
+#### 	3.999999523162841796875e+00,
+#### 	1082130430 = float_to_int32_bits(int32_bits_to_float(1082130430)));
+#### SELECT * FROM t3 WHERE i = 1082130430;
+#### 
+#### INSERT INTO t3 VALUES(1082130431,
+#### 	int32_bits_to_float(1082130431),
+#### 	float_to_int32_bits(int32_bits_to_float(1082130431)),
+#### 	'3.999999761581420898438e+00',
+#### 	3.999999761581420898438e+00,
+#### 	1082130431 = float_to_int32_bits(int32_bits_to_float(1082130431)));
+#### SELECT * FROM t3 WHERE i = 1082130431;
+#### 
+#### INSERT INTO t3 VALUES(1082130432,
+#### 	int32_bits_to_float(1082130432),
+#### 	float_to_int32_bits(int32_bits_to_float(1082130432)),
+#### 	'4.000000000000000000000e+00',
+#### 	4.000000000000000000000e+00,
+#### 	1082130432 = float_to_int32_bits(int32_bits_to_float(1082130432)));
+#### SELECT * FROM t3 WHERE i = 1082130432;
+#### 
+#### INSERT INTO t3 VALUES(1082130433,
+#### 	int32_bits_to_float(1082130433),
+#### 	float_to_int32_bits(int32_bits_to_float(1082130433)),
+#### 	'4.000000476837158203125e+00',
+#### 	4.000000476837158203125e+00,
+#### 	1082130433 = float_to_int32_bits(int32_bits_to_float(1082130433)));
+#### SELECT * FROM t3 WHERE i = 1082130433;
+#### 
+#### INSERT INTO t3 VALUES(1086324734,
+#### 	int32_bits_to_float(1086324734),
+#### 	float_to_int32_bits(int32_bits_to_float(1086324734)),
+#### 	'5.999999046325683593750e+00',
+#### 	5.999999046325683593750e+00,
+#### 	1086324734 = float_to_int32_bits(int32_bits_to_float(1086324734)));
+#### SELECT * FROM t3 WHERE i = 1086324734;
+#### 
+#### INSERT INTO t3 VALUES(1086324735,
+#### 	int32_bits_to_float(1086324735),
+#### 	float_to_int32_bits(int32_bits_to_float(1086324735)),
+#### 	'5.999999523162841796875e+00',
+#### 	5.999999523162841796875e+00,
+#### 	1086324735 = float_to_int32_bits(int32_bits_to_float(1086324735)));
+#### SELECT * FROM t3 WHERE i = 1086324735;
+#### 
+#### INSERT INTO t3 VALUES(1086324736,
+#### 	int32_bits_to_float(1086324736),
+#### 	float_to_int32_bits(int32_bits_to_float(1086324736)),
+#### 	'6.000000000000000000000e+00',
+#### 	6.000000000000000000000e+00,
+#### 	1086324736 = float_to_int32_bits(int32_bits_to_float(1086324736)));
+#### SELECT * FROM t3 WHERE i = 1086324736;
+#### 
+#### INSERT INTO t3 VALUES(1086324737,
+#### 	int32_bits_to_float(1086324737),
+#### 	float_to_int32_bits(int32_bits_to_float(1086324737)),
+#### 	'6.000000476837158203125e+00',
+#### 	6.000000476837158203125e+00,
+#### 	1086324737 = float_to_int32_bits(int32_bits_to_float(1086324737)));
+#### SELECT * FROM t3 WHERE i = 1086324737;
+#### 
+#### INSERT INTO t3 VALUES(1090519038,
+#### 	int32_bits_to_float(1090519038),
+#### 	float_to_int32_bits(int32_bits_to_float(1090519038)),
+#### 	'7.999999046325683593750e+00',
+#### 	7.999999046325683593750e+00,
+#### 	1090519038 = float_to_int32_bits(int32_bits_to_float(1090519038)));
+#### SELECT * FROM t3 WHERE i = 1090519038;
+#### 
+#### INSERT INTO t3 VALUES(1090519039,
+#### 	int32_bits_to_float(1090519039),
+#### 	float_to_int32_bits(int32_bits_to_float(1090519039)),
+#### 	'7.999999523162841796875e+00',
+#### 	7.999999523162841796875e+00,
+#### 	1090519039 = float_to_int32_bits(int32_bits_to_float(1090519039)));
+#### SELECT * FROM t3 WHERE i = 1090519039;
+#### 
+#### INSERT INTO t3 VALUES(2130706432,
+#### 	int32_bits_to_float(2130706432),
+#### 	float_to_int32_bits(int32_bits_to_float(2130706432)),
+#### 	'1.701411834604692317317e+38',
+#### 	1.701411834604692317317e+38,
+#### 	2130706432 = float_to_int32_bits(int32_bits_to_float(2130706432)));
+#### SELECT * FROM t3 WHERE i = 2130706432;
+#### 
+#### INSERT INTO t3 VALUES(2130706433,
+#### 	int32_bits_to_float(2130706433),
+#### 	float_to_int32_bits(int32_bits_to_float(2130706433)),
+#### 	'1.701412037428788353834e+38',
+#### 	1.701412037428788353834e+38,
+#### 	2130706433 = float_to_int32_bits(int32_bits_to_float(2130706433)));
+#### SELECT * FROM t3 WHERE i = 2130706433;
+#### 
+#### INSERT INTO t3 VALUES(2134900734,
+#### 	int32_bits_to_float(2134900734),
+#### 	float_to_int32_bits(int32_bits_to_float(2134900734)),
+#### 	'2.552117346258846402942e+38',
+#### 	2.552117346258846402942e+38,
+#### 	2134900734 = float_to_int32_bits(int32_bits_to_float(2134900734)));
+#### SELECT * FROM t3 WHERE i = 2134900734;
+#### 
+#### INSERT INTO t3 VALUES(2134900735,
+#### 	int32_bits_to_float(2134900735),
+#### 	float_to_int32_bits(int32_bits_to_float(2134900735)),
+#### 	'2.552117549082942439459e+38',
+#### 	2.552117549082942439459e+38,
+#### 	2134900735 = float_to_int32_bits(int32_bits_to_float(2134900735)));
+#### SELECT * FROM t3 WHERE i = 2134900735;
+#### 
+#### INSERT INTO t3 VALUES(2134900736,
+#### 	int32_bits_to_float(2134900736),
+#### 	float_to_int32_bits(int32_bits_to_float(2134900736)),
+#### 	'2.552117751907038475975e+38',
+#### 	2.552117751907038475975e+38,
+#### 	2134900736 = float_to_int32_bits(int32_bits_to_float(2134900736)));
+#### SELECT * FROM t3 WHERE i = 2134900736;
+#### 
+#### INSERT INTO t3 VALUES(2134900737,
+#### 	int32_bits_to_float(2134900737),
+#### 	float_to_int32_bits(int32_bits_to_float(2134900737)),
+#### 	'2.552117954731134512492e+38',
+#### 	2.552117954731134512492e+38,
+#### 	2134900737 = float_to_int32_bits(int32_bits_to_float(2134900737)));
+#### SELECT * FROM t3 WHERE i = 2134900737;
+#### 
+#### INSERT INTO t3 VALUES(2139095038,
+#### 	int32_bits_to_float(2139095038),
+#### 	float_to_int32_bits(int32_bits_to_float(2139095038)),
+#### 	'3.402823263561192561600e+38',
+#### 	3.402823263561192561600e+38,
+#### 	2139095038 = float_to_int32_bits(int32_bits_to_float(2139095038)));
+#### SELECT * FROM t3 WHERE i = 2139095038;
+#### 
+#### INSERT INTO t3 VALUES(2139095039,
+#### 	int32_bits_to_float(2139095039),
+#### 	float_to_int32_bits(int32_bits_to_float(2139095039)),
+#### 	'3.402823466385288598117e+38',
+#### 	3.402823466385288598117e+38,
+#### 	2139095039 = float_to_int32_bits(int32_bits_to_float(2139095039)));
+#### SELECT * FROM t3 WHERE i = 2139095039;
+#### 
+#### INSERT INTO t3 VALUES(2139095040,
+#### 	int32_bits_to_float(2139095040),
+#### 	float_to_int32_bits(int32_bits_to_float(2139095040)),
+#### 	'inf',
+#### 	inf,
+#### 	2139095040 = float_to_int32_bits(int32_bits_to_float(2139095040)));
+#### SELECT * FROM t3 WHERE i = 2139095040;
+#### 
+#### INSERT INTO t3 VALUES(2139095041,
+#### 	int32_bits_to_float(2139095041),
+#### 	float_to_int32_bits(int32_bits_to_float(2139095041)),
+#### 	'nan',
+#### 	nan,
+#### 	2139095041 = float_to_int32_bits(int32_bits_to_float(2139095041)));
+#### SELECT * FROM t3 WHERE i = 2139095041;
+#### 
+#### INSERT INTO t3 VALUES(2143289342,
+#### 	int32_bits_to_float(2143289342),
+#### 	float_to_int32_bits(int32_bits_to_float(2143289342)),
+#### 	'nan',
+#### 	nan,
+#### 	2143289342 = float_to_int32_bits(int32_bits_to_float(2143289342)));
+#### SELECT * FROM t3 WHERE i = 2143289342;
+#### 
+#### INSERT INTO t3 VALUES(2143289343,
+#### 	int32_bits_to_float(2143289343),
+#### 	float_to_int32_bits(int32_bits_to_float(2143289343)),
+#### 	'nan',
+#### 	nan,
+#### 	2143289343 = float_to_int32_bits(int32_bits_to_float(2143289343)));
+#### SELECT * FROM t3 WHERE i = 2143289343;
+#### 
+#### INSERT INTO t3 VALUES(2143289344,
+#### 	int32_bits_to_float(2143289344),
+#### 	float_to_int32_bits(int32_bits_to_float(2143289344)),
+#### 	'nan',
+#### 	nan,
+#### 	2143289344 = float_to_int32_bits(int32_bits_to_float(2143289344)));
+#### SELECT * FROM t3 WHERE i = 2143289344;
+#### 
+#### INSERT INTO t3 VALUES(2143289345,
+#### 	int32_bits_to_float(2143289345),
+#### 	float_to_int32_bits(int32_bits_to_float(2143289345)),
+#### 	'nan',
+#### 	nan,
+#### 	2143289345 = float_to_int32_bits(int32_bits_to_float(2143289345)));
+#### SELECT * FROM t3 WHERE i = 2143289345;
+#### 
+#### INSERT INTO t3 VALUES(2147483646,
+#### 	int32_bits_to_float(2147483646),
+#### 	float_to_int32_bits(int32_bits_to_float(2147483646)),
+#### 	'nan',
+#### 	nan,
+#### 	2147483646 = float_to_int32_bits(int32_bits_to_float(2147483646)));
+#### SELECT * FROM t3 WHERE i = 2147483646;
+#### 
+#### INSERT INTO t3 VALUES(2147483647,
+#### 	int32_bits_to_float(2147483647),
+#### 	float_to_int32_bits(int32_bits_to_float(2147483647)),
+#### 	'nan',
+#### 	nan,
+#### 	2147483647 = float_to_int32_bits(int32_bits_to_float(2147483647)));
+#### SELECT * FROM t3 WHERE i = 2147483647;
+#### 
+#### 
+#### # test round-tripping values across the signed 64bit range
+#### # we expect that +/-NAN and +/-INF will result in NULL
+#### CREATE TABLE t4 (
+#### i bigint,
+#### i2f double,
+#### i2f2i bigint,
+#### s varchar(255),
+#### s2f double,
+#### i2f2iei int
+#### );
+#### 
+#### INSERT INTO t4 VALUES(-9223372036854775807,
+#### 	int64_bits_to_float(-9223372036854775807),
+#### 	float_to_int64_bits(int64_bits_to_float(-9223372036854775807)),
+#### 	'-4.940656458412465441766e-324',
+#### 	-4.940656458412465441766e-324,
+#### 	-9223372036854775807 = float_to_int64_bits(int64_bits_to_float(-9223372036854775807)));
+#### SELECT * FROM t4 WHERE i = -9223372036854775807;
+#### 
+#### INSERT INTO t4 VALUES(-9223372036854775806,
+#### 	int64_bits_to_float(-9223372036854775806),
+#### 	float_to_int64_bits(int64_bits_to_float(-9223372036854775806)),
+#### 	'-9.881312916824930883531e-324',
+#### 	-9.881312916824930883531e-324,
+#### 	-9223372036854775806 = float_to_int64_bits(int64_bits_to_float(-9223372036854775806)));
+#### SELECT * FROM t4 WHERE i = -9223372036854775806;
+#### 
+#### INSERT INTO t4 VALUES(-9221120237041090561,
+#### 	int64_bits_to_float(-9221120237041090561),
+#### 	float_to_int64_bits(int64_bits_to_float(-9221120237041090561)),
+#### 	'-1.112536929253600197479e-308',
+#### 	-1.112536929253600197479e-308,
+#### 	-9221120237041090561 = float_to_int64_bits(int64_bits_to_float(-9221120237041090561)));
+#### SELECT * FROM t4 WHERE i = -9221120237041090561;
+#### 
+#### INSERT INTO t4 VALUES(-9221120237041090560,
+#### 	int64_bits_to_float(-9221120237041090560),
+#### 	float_to_int64_bits(int64_bits_to_float(-9221120237041090560)),
+#### 	'-1.112536929253600691545e-308',
+#### 	-1.112536929253600691545e-308,
+#### 	-9221120237041090560 = float_to_int64_bits(int64_bits_to_float(-9221120237041090560)));
+#### SELECT * FROM t4 WHERE i = -9221120237041090560;
+#### 
+#### INSERT INTO t4 VALUES(-9221120237041090559,
+#### 	int64_bits_to_float(-9221120237041090559),
+#### 	float_to_int64_bits(int64_bits_to_float(-9221120237041090559)),
+#### 	'-1.112536929253601185611e-308',
+#### 	-1.112536929253601185611e-308,
+#### 	-9221120237041090559 = float_to_int64_bits(int64_bits_to_float(-9221120237041090559)));
+#### SELECT * FROM t4 WHERE i = -9221120237041090559;
+#### 
+#### INSERT INTO t4 VALUES(-9221120237041090558,
+#### 	int64_bits_to_float(-9221120237041090558),
+#### 	float_to_int64_bits(int64_bits_to_float(-9221120237041090558)),
+#### 	'-1.112536929253601679676e-308',
+#### 	-1.112536929253601679676e-308,
+#### 	-9221120237041090558 = float_to_int64_bits(int64_bits_to_float(-9221120237041090558)));
+#### SELECT * FROM t4 WHERE i = -9221120237041090558;
+#### 
+#### INSERT INTO t4 VALUES(-9218868437227405313,
+#### 	int64_bits_to_float(-9218868437227405313),
+#### 	float_to_int64_bits(int64_bits_to_float(-9218868437227405313)),
+#### 	'-2.225073858507200889025e-308',
+#### 	-2.225073858507200889025e-308,
+#### 	-9218868437227405313 = float_to_int64_bits(int64_bits_to_float(-9218868437227405313)));
+#### SELECT * FROM t4 WHERE i = -9218868437227405313;
+#### 
+#### INSERT INTO t4 VALUES(-9218868437227405312,
+#### 	int64_bits_to_float(-9218868437227405312),
+#### 	float_to_int64_bits(int64_bits_to_float(-9218868437227405312)),
+#### 	'-2.225073858507201383090e-308',
+#### 	-2.225073858507201383090e-308,
+#### 	-9218868437227405312 = float_to_int64_bits(int64_bits_to_float(-9218868437227405312)));
+#### SELECT * FROM t4 WHERE i = -9218868437227405312;
+#### 
+#### INSERT INTO t4 VALUES(-9218868437227405311,
+#### 	int64_bits_to_float(-9218868437227405311),
+#### 	float_to_int64_bits(int64_bits_to_float(-9218868437227405311)),
+#### 	'-2.225073858507201877156e-308',
+#### 	-2.225073858507201877156e-308,
+#### 	-9218868437227405311 = float_to_int64_bits(int64_bits_to_float(-9218868437227405311)));
+#### SELECT * FROM t4 WHERE i = -9218868437227405311;
+#### 
+#### INSERT INTO t4 VALUES(-9218868437227405310,
+#### 	int64_bits_to_float(-9218868437227405310),
+#### 	float_to_int64_bits(int64_bits_to_float(-9218868437227405310)),
+#### 	'-2.225073858507202371222e-308',
+#### 	-2.225073858507202371222e-308,
+#### 	-9218868437227405310 = float_to_int64_bits(int64_bits_to_float(-9218868437227405310)));
+#### SELECT * FROM t4 WHERE i = -9218868437227405310;
+#### 
+#### INSERT INTO t4 VALUES(-9216616637413720065,
+#### 	int64_bits_to_float(-9216616637413720065),
+#### 	float_to_int64_bits(int64_bits_to_float(-9216616637413720065)),
+#### 	'-3.337610787760801580570e-308',
+#### 	-3.337610787760801580570e-308,
+#### 	-9216616637413720065 = float_to_int64_bits(int64_bits_to_float(-9216616637413720065)));
+#### SELECT * FROM t4 WHERE i = -9216616637413720065;
+#### 
+#### INSERT INTO t4 VALUES(-9216616637413720064,
+#### 	int64_bits_to_float(-9216616637413720064),
+#### 	float_to_int64_bits(int64_bits_to_float(-9216616637413720064)),
+#### 	'-3.337610787760802074635e-308',
+#### 	-3.337610787760802074635e-308,
+#### 	-9216616637413720064 = float_to_int64_bits(int64_bits_to_float(-9216616637413720064)));
+#### SELECT * FROM t4 WHERE i = -9216616637413720064;
+#### 
+#### INSERT INTO t4 VALUES(-9216616637413720063,
+#### 	int64_bits_to_float(-9216616637413720063),
+#### 	float_to_int64_bits(int64_bits_to_float(-9216616637413720063)),
+#### 	'-3.337610787760802568701e-308',
+#### 	-3.337610787760802568701e-308,
+#### 	-9216616637413720063 = float_to_int64_bits(int64_bits_to_float(-9216616637413720063)));
+#### SELECT * FROM t4 WHERE i = -9216616637413720063;
+#### 
+#### INSERT INTO t4 VALUES(-9216616637413720062,
+#### 	int64_bits_to_float(-9216616637413720062),
+#### 	float_to_int64_bits(int64_bits_to_float(-9216616637413720062)),
+#### 	'-3.337610787760803062767e-308',
+#### 	-3.337610787760803062767e-308,
+#### 	-9216616637413720062 = float_to_int64_bits(int64_bits_to_float(-9216616637413720062)));
+#### SELECT * FROM t4 WHERE i = -9216616637413720062;
+#### 
+#### INSERT INTO t4 VALUES(-9214364837600034817,
+#### 	int64_bits_to_float(-9214364837600034817),
+#### 	float_to_int64_bits(int64_bits_to_float(-9214364837600034817)),
+#### 	'-4.450147717014402272115e-308',
+#### 	-4.450147717014402272115e-308,
+#### 	-9214364837600034817 = float_to_int64_bits(int64_bits_to_float(-9214364837600034817)));
+#### SELECT * FROM t4 WHERE i = -9214364837600034817;
+#### 
+#### INSERT INTO t4 VALUES(-9214364837600034816,
+#### 	int64_bits_to_float(-9214364837600034816),
+#### 	float_to_int64_bits(int64_bits_to_float(-9214364837600034816)),
+#### 	'-4.450147717014402766180e-308',
+#### 	-4.450147717014402766180e-308,
+#### 	-9214364837600034816 = float_to_int64_bits(int64_bits_to_float(-9214364837600034816)));
+#### SELECT * FROM t4 WHERE i = -9214364837600034816;
+#### 
+#### INSERT INTO t4 VALUES(-4620693217682128895,
+#### 	int64_bits_to_float(-4620693217682128895),
+#### 	float_to_int64_bits(int64_bits_to_float(-4620693217682128895)),
+#### 	'-5.000000000000001110223e-01',
+#### 	-5.000000000000001110223e-01,
+#### 	-4620693217682128895 = float_to_int64_bits(int64_bits_to_float(-4620693217682128895)));
+#### SELECT * FROM t4 WHERE i = -4620693217682128895;
+#### 
+#### INSERT INTO t4 VALUES(-4620693217682128894,
+#### 	int64_bits_to_float(-4620693217682128894),
+#### 	float_to_int64_bits(int64_bits_to_float(-4620693217682128894)),
+#### 	'-5.000000000000002220446e-01',
+#### 	-5.000000000000002220446e-01,
+#### 	-4620693217682128894 = float_to_int64_bits(int64_bits_to_float(-4620693217682128894)));
+#### SELECT * FROM t4 WHERE i = -4620693217682128894;
+#### 
+#### INSERT INTO t4 VALUES(-4618441417868443649,
+#### 	int64_bits_to_float(-4618441417868443649),
+#### 	float_to_int64_bits(int64_bits_to_float(-4618441417868443649)),
+#### 	'-7.499999999999998889777e-01',
+#### 	-7.499999999999998889777e-01,
+#### 	-4618441417868443649 = float_to_int64_bits(int64_bits_to_float(-4618441417868443649)));
+#### SELECT * FROM t4 WHERE i = -4618441417868443649;
+#### 
+#### INSERT INTO t4 VALUES(-4618441417868443648,
+#### 	int64_bits_to_float(-4618441417868443648),
+#### 	float_to_int64_bits(int64_bits_to_float(-4618441417868443648)),
+#### 	'-7.500000000000000000000e-01',
+#### 	-7.500000000000000000000e-01,
+#### 	-4618441417868443648 = float_to_int64_bits(int64_bits_to_float(-4618441417868443648)));
+#### SELECT * FROM t4 WHERE i = -4618441417868443648;
+#### 
+#### INSERT INTO t4 VALUES(-4618441417868443647,
+#### 	int64_bits_to_float(-4618441417868443647),
+#### 	float_to_int64_bits(int64_bits_to_float(-4618441417868443647)),
+#### 	'-7.500000000000001110223e-01',
+#### 	-7.500000000000001110223e-01,
+#### 	-4618441417868443647 = float_to_int64_bits(int64_bits_to_float(-4618441417868443647)));
+#### SELECT * FROM t4 WHERE i = -4618441417868443647;
+#### 
+#### INSERT INTO t4 VALUES(-4618441417868443646,
+#### 	int64_bits_to_float(-4618441417868443646),
+#### 	float_to_int64_bits(int64_bits_to_float(-4618441417868443646)),
+#### 	'-7.500000000000002220446e-01',
+#### 	-7.500000000000002220446e-01,
+#### 	-4618441417868443646 = float_to_int64_bits(int64_bits_to_float(-4618441417868443646)));
+#### SELECT * FROM t4 WHERE i = -4618441417868443646;
+#### 
+#### INSERT INTO t4 VALUES(-4616189618054758401,
+#### 	int64_bits_to_float(-4616189618054758401),
+#### 	float_to_int64_bits(int64_bits_to_float(-4616189618054758401)),
+#### 	'-9.999999999999998889777e-01',
+#### 	-9.999999999999998889777e-01,
+#### 	-4616189618054758401 = float_to_int64_bits(int64_bits_to_float(-4616189618054758401)));
+#### SELECT * FROM t4 WHERE i = -4616189618054758401;
+#### 
+#### INSERT INTO t4 VALUES(-4616189618054758400,
+#### 	int64_bits_to_float(-4616189618054758400),
+#### 	float_to_int64_bits(int64_bits_to_float(-4616189618054758400)),
+#### 	'-1.000000000000000000000e+00',
+#### 	-1.000000000000000000000e+00,
+#### 	-4616189618054758400 = float_to_int64_bits(int64_bits_to_float(-4616189618054758400)));
+#### SELECT * FROM t4 WHERE i = -4616189618054758400;
+#### 
+#### INSERT INTO t4 VALUES(-4616189618054758399,
+#### 	int64_bits_to_float(-4616189618054758399),
+#### 	float_to_int64_bits(int64_bits_to_float(-4616189618054758399)),
+#### 	'-1.000000000000000222045e+00',
+#### 	-1.000000000000000222045e+00,
+#### 	-4616189618054758399 = float_to_int64_bits(int64_bits_to_float(-4616189618054758399)));
+#### SELECT * FROM t4 WHERE i = -4616189618054758399;
+#### 
+#### INSERT INTO t4 VALUES(-4616189618054758398,
+#### 	int64_bits_to_float(-4616189618054758398),
+#### 	float_to_int64_bits(int64_bits_to_float(-4616189618054758398)),
+#### 	'-1.000000000000000444089e+00',
+#### 	-1.000000000000000444089e+00,
+#### 	-4616189618054758398 = float_to_int64_bits(int64_bits_to_float(-4616189618054758398)));
+#### SELECT * FROM t4 WHERE i = -4616189618054758398;
+#### 
+#### INSERT INTO t4 VALUES(-4613937818241073153,
+#### 	int64_bits_to_float(-4613937818241073153),
+#### 	float_to_int64_bits(int64_bits_to_float(-4613937818241073153)),
+#### 	'-1.499999999999999777955e+00',
+#### 	-1.499999999999999777955e+00,
+#### 	-4613937818241073153 = float_to_int64_bits(int64_bits_to_float(-4613937818241073153)));
+#### SELECT * FROM t4 WHERE i = -4613937818241073153;
+#### 
+#### INSERT INTO t4 VALUES(-4613937818241073152,
+#### 	int64_bits_to_float(-4613937818241073152),
+#### 	float_to_int64_bits(int64_bits_to_float(-4613937818241073152)),
+#### 	'-1.500000000000000000000e+00',
+#### 	-1.500000000000000000000e+00,
+#### 	-4613937818241073152 = float_to_int64_bits(int64_bits_to_float(-4613937818241073152)));
+#### SELECT * FROM t4 WHERE i = -4613937818241073152;
+#### 
+#### INSERT INTO t4 VALUES(-4613937818241073151,
+#### 	int64_bits_to_float(-4613937818241073151),
+#### 	float_to_int64_bits(int64_bits_to_float(-4613937818241073151)),
+#### 	'-1.500000000000000222045e+00',
+#### 	-1.500000000000000222045e+00,
+#### 	-4613937818241073151 = float_to_int64_bits(int64_bits_to_float(-4613937818241073151)));
+#### SELECT * FROM t4 WHERE i = -4613937818241073151;
+#### 
+#### INSERT INTO t4 VALUES(-4613937818241073150,
+#### 	int64_bits_to_float(-4613937818241073150),
+#### 	float_to_int64_bits(int64_bits_to_float(-4613937818241073150)),
+#### 	'-1.500000000000000444089e+00',
+#### 	-1.500000000000000444089e+00,
+#### 	-4613937818241073150 = float_to_int64_bits(int64_bits_to_float(-4613937818241073150)));
+#### SELECT * FROM t4 WHERE i = -4613937818241073150;
+#### 
+#### INSERT INTO t4 VALUES(-4611686018427387905,
+#### 	int64_bits_to_float(-4611686018427387905),
+#### 	float_to_int64_bits(int64_bits_to_float(-4611686018427387905)),
+#### 	'-1.999999999999999777955e+00',
+#### 	-1.999999999999999777955e+00,
+#### 	-4611686018427387905 = float_to_int64_bits(int64_bits_to_float(-4611686018427387905)));
+#### SELECT * FROM t4 WHERE i = -4611686018427387905;
+#### 
+#### INSERT INTO t4 VALUES(-4611686018427387904,
+#### 	int64_bits_to_float(-4611686018427387904),
+#### 	float_to_int64_bits(int64_bits_to_float(-4611686018427387904)),
+#### 	'-2.000000000000000000000e+00',
+#### 	-2.000000000000000000000e+00,
+#### 	-4611686018427387904 = float_to_int64_bits(int64_bits_to_float(-4611686018427387904)));
+#### SELECT * FROM t4 WHERE i = -4611686018427387904;
+#### 
+#### INSERT INTO t4 VALUES(-4611686018427387903,
+#### 	int64_bits_to_float(-4611686018427387903),
+#### 	float_to_int64_bits(int64_bits_to_float(-4611686018427387903)),
+#### 	'-2.000000000000000444089e+00',
+#### 	-2.000000000000000444089e+00,
+#### 	-4611686018427387903 = float_to_int64_bits(int64_bits_to_float(-4611686018427387903)));
+#### SELECT * FROM t4 WHERE i = -4611686018427387903;
+#### 
+#### INSERT INTO t4 VALUES(-4611686018427387902,
+#### 	int64_bits_to_float(-4611686018427387902),
+#### 	float_to_int64_bits(int64_bits_to_float(-4611686018427387902)),
+#### 	'-2.000000000000000888178e+00',
+#### 	-2.000000000000000888178e+00,
+#### 	-4611686018427387902 = float_to_int64_bits(int64_bits_to_float(-4611686018427387902)));
+#### SELECT * FROM t4 WHERE i = -4611686018427387902;
+#### 
+#### INSERT INTO t4 VALUES(-4609434218613702657,
+#### 	int64_bits_to_float(-4609434218613702657),
+#### 	float_to_int64_bits(int64_bits_to_float(-4609434218613702657)),
+#### 	'-2.999999999999999555911e+00',
+#### 	-2.999999999999999555911e+00,
+#### 	-4609434218613702657 = float_to_int64_bits(int64_bits_to_float(-4609434218613702657)));
+#### SELECT * FROM t4 WHERE i = -4609434218613702657;
+#### 
+#### INSERT INTO t4 VALUES(-4609434218613702656,
+#### 	int64_bits_to_float(-4609434218613702656),
+#### 	float_to_int64_bits(int64_bits_to_float(-4609434218613702656)),
+#### 	'-3.000000000000000000000e+00',
+#### 	-3.000000000000000000000e+00,
+#### 	-4609434218613702656 = float_to_int64_bits(int64_bits_to_float(-4609434218613702656)));
+#### SELECT * FROM t4 WHERE i = -4609434218613702656;
+#### 
+#### INSERT INTO t4 VALUES(-4609434218613702655,
+#### 	int64_bits_to_float(-4609434218613702655),
+#### 	float_to_int64_bits(int64_bits_to_float(-4609434218613702655)),
+#### 	'-3.000000000000000444089e+00',
+#### 	-3.000000000000000444089e+00,
+#### 	-4609434218613702655 = float_to_int64_bits(int64_bits_to_float(-4609434218613702655)));
+#### SELECT * FROM t4 WHERE i = -4609434218613702655;
+#### 
+#### INSERT INTO t4 VALUES(-4609434218613702654,
+#### 	int64_bits_to_float(-4609434218613702654),
+#### 	float_to_int64_bits(int64_bits_to_float(-4609434218613702654)),
+#### 	'-3.000000000000000888178e+00',
+#### 	-3.000000000000000888178e+00,
+#### 	-4609434218613702654 = float_to_int64_bits(int64_bits_to_float(-4609434218613702654)));
+#### SELECT * FROM t4 WHERE i = -4609434218613702654;
+#### 
+#### INSERT INTO t4 VALUES(-4607182418800017409,
+#### 	int64_bits_to_float(-4607182418800017409),
+#### 	float_to_int64_bits(int64_bits_to_float(-4607182418800017409)),
+#### 	'-3.999999999999999555911e+00',
+#### 	-3.999999999999999555911e+00,
+#### 	-4607182418800017409 = float_to_int64_bits(int64_bits_to_float(-4607182418800017409)));
+#### SELECT * FROM t4 WHERE i = -4607182418800017409;
+#### 
+#### INSERT INTO t4 VALUES(-4607182418800017408,
+#### 	int64_bits_to_float(-4607182418800017408),
+#### 	float_to_int64_bits(int64_bits_to_float(-4607182418800017408)),
+#### 	'-4.000000000000000000000e+00',
+#### 	-4.000000000000000000000e+00,
+#### 	-4607182418800017408 = float_to_int64_bits(int64_bits_to_float(-4607182418800017408)));
+#### SELECT * FROM t4 WHERE i = -4607182418800017408;
+#### 
+#### INSERT INTO t4 VALUES(-4607182418800017407,
+#### 	int64_bits_to_float(-4607182418800017407),
+#### 	float_to_int64_bits(int64_bits_to_float(-4607182418800017407)),
+#### 	'-4.000000000000000888178e+00',
+#### 	-4.000000000000000888178e+00,
+#### 	-4607182418800017407 = float_to_int64_bits(int64_bits_to_float(-4607182418800017407)));
+#### SELECT * FROM t4 WHERE i = -4607182418800017407;
+#### 
+#### INSERT INTO t4 VALUES(-4607182418800017406,
+#### 	int64_bits_to_float(-4607182418800017406),
+#### 	float_to_int64_bits(int64_bits_to_float(-4607182418800017406)),
+#### 	'-4.000000000000001776357e+00',
+#### 	-4.000000000000001776357e+00,
+#### 	-4607182418800017406 = float_to_int64_bits(int64_bits_to_float(-4607182418800017406)));
+#### SELECT * FROM t4 WHERE i = -4607182418800017406;
+#### 
+#### INSERT INTO t4 VALUES(-4604930618986332161,
+#### 	int64_bits_to_float(-4604930618986332161),
+#### 	float_to_int64_bits(int64_bits_to_float(-4604930618986332161)),
+#### 	'-5.999999999999999111822e+00',
+#### 	-5.999999999999999111822e+00,
+#### 	-4604930618986332161 = float_to_int64_bits(int64_bits_to_float(-4604930618986332161)));
+#### SELECT * FROM t4 WHERE i = -4604930618986332161;
+#### 
+#### INSERT INTO t4 VALUES(-4604930618986332160,
+#### 	int64_bits_to_float(-4604930618986332160),
+#### 	float_to_int64_bits(int64_bits_to_float(-4604930618986332160)),
+#### 	'-6.000000000000000000000e+00',
+#### 	-6.000000000000000000000e+00,
+#### 	-4604930618986332160 = float_to_int64_bits(int64_bits_to_float(-4604930618986332160)));
+#### SELECT * FROM t4 WHERE i = -4604930618986332160;
+#### 
+#### INSERT INTO t4 VALUES(-4604930618986332159,
+#### 	int64_bits_to_float(-4604930618986332159),
+#### 	float_to_int64_bits(int64_bits_to_float(-4604930618986332159)),
+#### 	'-6.000000000000000888178e+00',
+#### 	-6.000000000000000888178e+00,
+#### 	-4604930618986332159 = float_to_int64_bits(int64_bits_to_float(-4604930618986332159)));
+#### SELECT * FROM t4 WHERE i = -4604930618986332159;
+#### 
+#### INSERT INTO t4 VALUES(-4604930618986332158,
+#### 	int64_bits_to_float(-4604930618986332158),
+#### 	float_to_int64_bits(int64_bits_to_float(-4604930618986332158)),
+#### 	'-6.000000000000001776357e+00',
+#### 	-6.000000000000001776357e+00,
+#### 	-4604930618986332158 = float_to_int64_bits(int64_bits_to_float(-4604930618986332158)));
+#### SELECT * FROM t4 WHERE i = -4604930618986332158;
+#### 
+#### INSERT INTO t4 VALUES(-4602678819172646913,
+#### 	int64_bits_to_float(-4602678819172646913),
+#### 	float_to_int64_bits(int64_bits_to_float(-4602678819172646913)),
+#### 	'-7.999999999999999111822e+00',
+#### 	-7.999999999999999111822e+00,
+#### 	-4602678819172646913 = float_to_int64_bits(int64_bits_to_float(-4602678819172646913)));
+#### SELECT * FROM t4 WHERE i = -4602678819172646913;
+#### 
+#### INSERT INTO t4 VALUES(-4602678819172646912,
+#### 	int64_bits_to_float(-4602678819172646912),
+#### 	float_to_int64_bits(int64_bits_to_float(-4602678819172646912)),
+#### 	'-8.000000000000000000000e+00',
+#### 	-8.000000000000000000000e+00,
+#### 	-4602678819172646912 = float_to_int64_bits(int64_bits_to_float(-4602678819172646912)));
+#### SELECT * FROM t4 WHERE i = -4602678819172646912;
+#### 
+#### INSERT INTO t4 VALUES(-9007199254740991,
+#### 	int64_bits_to_float(-9007199254740991),
+#### 	float_to_int64_bits(int64_bits_to_float(-9007199254740991)),
+#### 	'-8.988465674311581534487e+307',
+#### 	-8.988465674311581534487e+307,
+#### 	-9007199254740991 = float_to_int64_bits(int64_bits_to_float(-9007199254740991)));
+#### SELECT * FROM t4 WHERE i = -9007199254740991;
+#### 
+#### INSERT INTO t4 VALUES(-9007199254740990,
+#### 	int64_bits_to_float(-9007199254740990),
+#### 	float_to_int64_bits(int64_bits_to_float(-9007199254740990)),
+#### 	'-8.988465674311583530327e+307',
+#### 	-8.988465674311583530327e+307,
+#### 	-9007199254740990 = float_to_int64_bits(int64_bits_to_float(-9007199254740990)));
+#### SELECT * FROM t4 WHERE i = -9007199254740990;
+#### 
+#### INSERT INTO t4 VALUES(-6755399441055745,
+#### 	int64_bits_to_float(-6755399441055745),
+#### 	float_to_int64_bits(int64_bits_to_float(-6755399441055745)),
+#### 	'-1.348269851146736731213e+308',
+#### 	-1.348269851146736731213e+308,
+#### 	-6755399441055745 = float_to_int64_bits(int64_bits_to_float(-6755399441055745)));
+#### SELECT * FROM t4 WHERE i = -6755399441055745;
+#### 
+#### INSERT INTO t4 VALUES(-6755399441055744,
+#### 	int64_bits_to_float(-6755399441055744),
+#### 	float_to_int64_bits(int64_bits_to_float(-6755399441055744)),
+#### 	'-1.348269851146736930797e+308',
+#### 	-1.348269851146736930797e+308,
+#### 	-6755399441055744 = float_to_int64_bits(int64_bits_to_float(-6755399441055744)));
+#### SELECT * FROM t4 WHERE i = -6755399441055744;
+#### 
+#### INSERT INTO t4 VALUES(-6755399441055743,
+#### 	int64_bits_to_float(-6755399441055743),
+#### 	float_to_int64_bits(int64_bits_to_float(-6755399441055743)),
+#### 	'-1.348269851146737130381e+308',
+#### 	-1.348269851146737130381e+308,
+#### 	-6755399441055743 = float_to_int64_bits(int64_bits_to_float(-6755399441055743)));
+#### SELECT * FROM t4 WHERE i = -6755399441055743;
+#### 
+#### INSERT INTO t4 VALUES(-6755399441055742,
+#### 	int64_bits_to_float(-6755399441055742),
+#### 	float_to_int64_bits(int64_bits_to_float(-6755399441055742)),
+#### 	'-1.348269851146737329965e+308',
+#### 	-1.348269851146737329965e+308,
+#### 	-6755399441055742 = float_to_int64_bits(int64_bits_to_float(-6755399441055742)));
+#### SELECT * FROM t4 WHERE i = -6755399441055742;
+#### 
+#### INSERT INTO t4 VALUES(-4503599627370497,
+#### 	int64_bits_to_float(-4503599627370497),
+#### 	float_to_int64_bits(int64_bits_to_float(-4503599627370497)),
+#### 	'-1.797693134862315708145e+308',
+#### 	-1.797693134862315708145e+308,
+#### 	-4503599627370497 = float_to_int64_bits(int64_bits_to_float(-4503599627370497)));
+#### SELECT * FROM t4 WHERE i = -4503599627370497;
+#### 
+#### INSERT INTO t4 VALUES(-4503599627370496,
+#### 	int64_bits_to_float(-4503599627370496),
+#### 	float_to_int64_bits(int64_bits_to_float(-4503599627370496)),
+#### 	'-inf',
+#### 	-inf,
+#### 	-4503599627370496 = float_to_int64_bits(int64_bits_to_float(-4503599627370496)));
+#### SELECT * FROM t4 WHERE i = -4503599627370496;
+#### 
+#### INSERT INTO t4 VALUES(-4503599627370495,
+#### 	int64_bits_to_float(-4503599627370495),
+#### 	float_to_int64_bits(int64_bits_to_float(-4503599627370495)),
+#### 	'-nan',
+#### 	-nan,
+#### 	-4503599627370495 = float_to_int64_bits(int64_bits_to_float(-4503599627370495)));
+#### SELECT * FROM t4 WHERE i = -4503599627370495;
+#### 
+#### INSERT INTO t4 VALUES(-4503599627370494,
+#### 	int64_bits_to_float(-4503599627370494),
+#### 	float_to_int64_bits(int64_bits_to_float(-4503599627370494)),
+#### 	'-nan',
+#### 	-nan,
+#### 	-4503599627370494 = float_to_int64_bits(int64_bits_to_float(-4503599627370494)));
+#### SELECT * FROM t4 WHERE i = -4503599627370494;
+#### 
+#### INSERT INTO t4 VALUES(-2251799813685249,
+#### 	int64_bits_to_float(-2251799813685249),
+#### 	float_to_int64_bits(int64_bits_to_float(-2251799813685249)),
+#### 	'-nan',
+#### 	-nan,
+#### 	-2251799813685249 = float_to_int64_bits(int64_bits_to_float(-2251799813685249)));
+#### SELECT * FROM t4 WHERE i = -2251799813685249;
+#### 
+#### INSERT INTO t4 VALUES(-2251799813685248,
+#### 	int64_bits_to_float(-2251799813685248),
+#### 	float_to_int64_bits(int64_bits_to_float(-2251799813685248)),
+#### 	'-nan',
+#### 	-nan,
+#### 	-2251799813685248 = float_to_int64_bits(int64_bits_to_float(-2251799813685248)));
+#### SELECT * FROM t4 WHERE i = -2251799813685248;
+#### 
+#### INSERT INTO t4 VALUES(-2251799813685247,
+#### 	int64_bits_to_float(-2251799813685247),
+#### 	float_to_int64_bits(int64_bits_to_float(-2251799813685247)),
+#### 	'-nan',
+#### 	-nan,
+#### 	-2251799813685247 = float_to_int64_bits(int64_bits_to_float(-2251799813685247)));
+#### SELECT * FROM t4 WHERE i = -2251799813685247;
+#### 
+#### INSERT INTO t4 VALUES(-2251799813685246,
+#### 	int64_bits_to_float(-2251799813685246),
+#### 	float_to_int64_bits(int64_bits_to_float(-2251799813685246)),
+#### 	'-nan',
+#### 	-nan,
+#### 	-2251799813685246 = float_to_int64_bits(int64_bits_to_float(-2251799813685246)));
+#### SELECT * FROM t4 WHERE i = -2251799813685246;
+#### 
+#### INSERT INTO t4 VALUES(-1,
+#### 	int64_bits_to_float(-1),
+#### 	float_to_int64_bits(int64_bits_to_float(-1)),
+#### 	'-nan',
+#### 	-nan,
+#### 	-1 = float_to_int64_bits(int64_bits_to_float(-1)));
+#### SELECT * FROM t4 WHERE i = -1;
+#### 
+#### INSERT INTO t4 VALUES(0,
+#### 	int64_bits_to_float(0),
+#### 	float_to_int64_bits(int64_bits_to_float(0)),
+#### 	'0.000000000000000000000e+00',
+#### 	0.000000000000000000000e+00,
+#### 	0 = float_to_int64_bits(int64_bits_to_float(0)));
+#### SELECT * FROM t4 WHERE i = 0;
+#### 
+#### INSERT INTO t4 VALUES(0,
+#### 	int64_bits_to_float(0),
+#### 	float_to_int64_bits(int64_bits_to_float(0)),
+#### 	'0.000000000000000000000e+00',
+#### 	0.000000000000000000000e+00,
+#### 	0 = float_to_int64_bits(int64_bits_to_float(0)));
+#### SELECT * FROM t4 WHERE i = 0;
+#### 
+#### INSERT INTO t4 VALUES(1,
+#### 	int64_bits_to_float(1),
+#### 	float_to_int64_bits(int64_bits_to_float(1)),
+#### 	'4.940656458412465441766e-324',
+#### 	4.940656458412465441766e-324,
+#### 	1 = float_to_int64_bits(int64_bits_to_float(1)));
+#### SELECT * FROM t4 WHERE i = 1;
+#### 
+#### INSERT INTO t4 VALUES(2251799813685246,
+#### 	int64_bits_to_float(2251799813685246),
+#### 	float_to_int64_bits(int64_bits_to_float(2251799813685246)),
+#### 	'1.112536929253599703414e-308',
+#### 	1.112536929253599703414e-308,
+#### 	2251799813685246 = float_to_int64_bits(int64_bits_to_float(2251799813685246)));
+#### SELECT * FROM t4 WHERE i = 2251799813685246;
+#### 
+#### INSERT INTO t4 VALUES(2251799813685247,
+#### 	int64_bits_to_float(2251799813685247),
+#### 	float_to_int64_bits(int64_bits_to_float(2251799813685247)),
+#### 	'1.112536929253600197479e-308',
+#### 	1.112536929253600197479e-308,
+#### 	2251799813685247 = float_to_int64_bits(int64_bits_to_float(2251799813685247)));
+#### SELECT * FROM t4 WHERE i = 2251799813685247;
+#### 
+#### INSERT INTO t4 VALUES(2251799813685248,
+#### 	int64_bits_to_float(2251799813685248),
+#### 	float_to_int64_bits(int64_bits_to_float(2251799813685248)),
+#### 	'1.112536929253600691545e-308',
+#### 	1.112536929253600691545e-308,
+#### 	2251799813685248 = float_to_int64_bits(int64_bits_to_float(2251799813685248)));
+#### SELECT * FROM t4 WHERE i = 2251799813685248;
+#### 
+#### INSERT INTO t4 VALUES(2251799813685249,
+#### 	int64_bits_to_float(2251799813685249),
+#### 	float_to_int64_bits(int64_bits_to_float(2251799813685249)),
+#### 	'1.112536929253601185611e-308',
+#### 	1.112536929253601185611e-308,
+#### 	2251799813685249 = float_to_int64_bits(int64_bits_to_float(2251799813685249)));
+#### SELECT * FROM t4 WHERE i = 2251799813685249;
+#### 
+#### INSERT INTO t4 VALUES(4503599627370494,
+#### 	int64_bits_to_float(4503599627370494),
+#### 	float_to_int64_bits(int64_bits_to_float(4503599627370494)),
+#### 	'2.225073858507200394959e-308',
+#### 	2.225073858507200394959e-308,
+#### 	4503599627370494 = float_to_int64_bits(int64_bits_to_float(4503599627370494)));
+#### SELECT * FROM t4 WHERE i = 4503599627370494;
+#### 
+#### INSERT INTO t4 VALUES(4503599627370495,
+#### 	int64_bits_to_float(4503599627370495),
+#### 	float_to_int64_bits(int64_bits_to_float(4503599627370495)),
+#### 	'2.225073858507200889025e-308',
+#### 	2.225073858507200889025e-308,
+#### 	4503599627370495 = float_to_int64_bits(int64_bits_to_float(4503599627370495)));
+#### SELECT * FROM t4 WHERE i = 4503599627370495;
+#### 
+#### INSERT INTO t4 VALUES(4503599627370496,
+#### 	int64_bits_to_float(4503599627370496),
+#### 	float_to_int64_bits(int64_bits_to_float(4503599627370496)),
+#### 	'2.225073858507201383090e-308',
+#### 	2.225073858507201383090e-308,
+#### 	4503599627370496 = float_to_int64_bits(int64_bits_to_float(4503599627370496)));
+#### SELECT * FROM t4 WHERE i = 4503599627370496;
+#### 
+#### INSERT INTO t4 VALUES(4503599627370497,
+#### 	int64_bits_to_float(4503599627370497),
+#### 	float_to_int64_bits(int64_bits_to_float(4503599627370497)),
+#### 	'2.225073858507201877156e-308',
+#### 	2.225073858507201877156e-308,
+#### 	4503599627370497 = float_to_int64_bits(int64_bits_to_float(4503599627370497)));
+#### SELECT * FROM t4 WHERE i = 4503599627370497;
+#### 
+#### INSERT INTO t4 VALUES(6755399441055742,
+#### 	int64_bits_to_float(6755399441055742),
+#### 	float_to_int64_bits(int64_bits_to_float(6755399441055742)),
+#### 	'3.337610787760801086504e-308',
+#### 	3.337610787760801086504e-308,
+#### 	6755399441055742 = float_to_int64_bits(int64_bits_to_float(6755399441055742)));
+#### SELECT * FROM t4 WHERE i = 6755399441055742;
+#### 
+#### INSERT INTO t4 VALUES(6755399441055743,
+#### 	int64_bits_to_float(6755399441055743),
+#### 	float_to_int64_bits(int64_bits_to_float(6755399441055743)),
+#### 	'3.337610787760801580570e-308',
+#### 	3.337610787760801580570e-308,
+#### 	6755399441055743 = float_to_int64_bits(int64_bits_to_float(6755399441055743)));
+#### SELECT * FROM t4 WHERE i = 6755399441055743;
+#### 
+#### INSERT INTO t4 VALUES(6755399441055744,
+#### 	int64_bits_to_float(6755399441055744),
+#### 	float_to_int64_bits(int64_bits_to_float(6755399441055744)),
+#### 	'3.337610787760802074635e-308',
+#### 	3.337610787760802074635e-308,
+#### 	6755399441055744 = float_to_int64_bits(int64_bits_to_float(6755399441055744)));
+#### SELECT * FROM t4 WHERE i = 6755399441055744;
+#### 
+#### INSERT INTO t4 VALUES(6755399441055745,
+#### 	int64_bits_to_float(6755399441055745),
+#### 	float_to_int64_bits(int64_bits_to_float(6755399441055745)),
+#### 	'3.337610787760802568701e-308',
+#### 	3.337610787760802568701e-308,
+#### 	6755399441055745 = float_to_int64_bits(int64_bits_to_float(6755399441055745)));
+#### SELECT * FROM t4 WHERE i = 6755399441055745;
+#### 
+#### INSERT INTO t4 VALUES(9007199254740990,
+#### 	int64_bits_to_float(9007199254740990),
+#### 	float_to_int64_bits(int64_bits_to_float(9007199254740990)),
+#### 	'4.450147717014401778049e-308',
+#### 	4.450147717014401778049e-308,
+#### 	9007199254740990 = float_to_int64_bits(int64_bits_to_float(9007199254740990)));
+#### SELECT * FROM t4 WHERE i = 9007199254740990;
+#### 
+#### INSERT INTO t4 VALUES(9007199254740991,
+#### 	int64_bits_to_float(9007199254740991),
+#### 	float_to_int64_bits(int64_bits_to_float(9007199254740991)),
+#### 	'4.450147717014402272115e-308',
+#### 	4.450147717014402272115e-308,
+#### 	9007199254740991 = float_to_int64_bits(int64_bits_to_float(9007199254740991)));
+#### SELECT * FROM t4 WHERE i = 9007199254740991;
+#### 
+#### INSERT INTO t4 VALUES(4602678819172646912,
+#### 	int64_bits_to_float(4602678819172646912),
+#### 	float_to_int64_bits(int64_bits_to_float(4602678819172646912)),
+#### 	'5.000000000000000000000e-01',
+#### 	5.000000000000000000000e-01,
+#### 	4602678819172646912 = float_to_int64_bits(int64_bits_to_float(4602678819172646912)));
+#### SELECT * FROM t4 WHERE i = 4602678819172646912;
+#### 
+#### INSERT INTO t4 VALUES(4602678819172646913,
+#### 	int64_bits_to_float(4602678819172646913),
+#### 	float_to_int64_bits(int64_bits_to_float(4602678819172646913)),
+#### 	'5.000000000000001110223e-01',
+#### 	5.000000000000001110223e-01,
+#### 	4602678819172646913 = float_to_int64_bits(int64_bits_to_float(4602678819172646913)));
+#### SELECT * FROM t4 WHERE i = 4602678819172646913;
+#### 
+#### INSERT INTO t4 VALUES(4604930618986332158,
+#### 	int64_bits_to_float(4604930618986332158),
+#### 	float_to_int64_bits(int64_bits_to_float(4604930618986332158)),
+#### 	'7.499999999999997779554e-01',
+#### 	7.499999999999997779554e-01,
+#### 	4604930618986332158 = float_to_int64_bits(int64_bits_to_float(4604930618986332158)));
+#### SELECT * FROM t4 WHERE i = 4604930618986332158;
+#### 
+#### INSERT INTO t4 VALUES(4604930618986332159,
+#### 	int64_bits_to_float(4604930618986332159),
+#### 	float_to_int64_bits(int64_bits_to_float(4604930618986332159)),
+#### 	'7.499999999999998889777e-01',
+#### 	7.499999999999998889777e-01,
+#### 	4604930618986332159 = float_to_int64_bits(int64_bits_to_float(4604930618986332159)));
+#### SELECT * FROM t4 WHERE i = 4604930618986332159;
+#### 
+#### INSERT INTO t4 VALUES(4604930618986332160,
+#### 	int64_bits_to_float(4604930618986332160),
+#### 	float_to_int64_bits(int64_bits_to_float(4604930618986332160)),
+#### 	'7.500000000000000000000e-01',
+#### 	7.500000000000000000000e-01,
+#### 	4604930618986332160 = float_to_int64_bits(int64_bits_to_float(4604930618986332160)));
+#### SELECT * FROM t4 WHERE i = 4604930618986332160;
+#### 
+#### INSERT INTO t4 VALUES(4604930618986332161,
+#### 	int64_bits_to_float(4604930618986332161),
+#### 	float_to_int64_bits(int64_bits_to_float(4604930618986332161)),
+#### 	'7.500000000000001110223e-01',
+#### 	7.500000000000001110223e-01,
+#### 	4604930618986332161 = float_to_int64_bits(int64_bits_to_float(4604930618986332161)));
+#### SELECT * FROM t4 WHERE i = 4604930618986332161;
+#### 
+#### INSERT INTO t4 VALUES(4607182418800017406,
+#### 	int64_bits_to_float(4607182418800017406),
+#### 	float_to_int64_bits(int64_bits_to_float(4607182418800017406)),
+#### 	'9.999999999999997779554e-01',
+#### 	9.999999999999997779554e-01,
+#### 	4607182418800017406 = float_to_int64_bits(int64_bits_to_float(4607182418800017406)));
+#### SELECT * FROM t4 WHERE i = 4607182418800017406;
+#### 
+#### INSERT INTO t4 VALUES(4607182418800017407,
+#### 	int64_bits_to_float(4607182418800017407),
+#### 	float_to_int64_bits(int64_bits_to_float(4607182418800017407)),
+#### 	'9.999999999999998889777e-01',
+#### 	9.999999999999998889777e-01,
+#### 	4607182418800017407 = float_to_int64_bits(int64_bits_to_float(4607182418800017407)));
+#### SELECT * FROM t4 WHERE i = 4607182418800017407;
+#### 
+#### INSERT INTO t4 VALUES(4607182418800017408,
+#### 	int64_bits_to_float(4607182418800017408),
+#### 	float_to_int64_bits(int64_bits_to_float(4607182418800017408)),
+#### 	'1.000000000000000000000e+00',
+#### 	1.000000000000000000000e+00,
+#### 	4607182418800017408 = float_to_int64_bits(int64_bits_to_float(4607182418800017408)));
+#### SELECT * FROM t4 WHERE i = 4607182418800017408;
+#### 
+#### INSERT INTO t4 VALUES(4607182418800017409,
+#### 	int64_bits_to_float(4607182418800017409),
+#### 	float_to_int64_bits(int64_bits_to_float(4607182418800017409)),
+#### 	'1.000000000000000222045e+00',
+#### 	1.000000000000000222045e+00,
+#### 	4607182418800017409 = float_to_int64_bits(int64_bits_to_float(4607182418800017409)));
+#### SELECT * FROM t4 WHERE i = 4607182418800017409;
+#### 
+#### INSERT INTO t4 VALUES(4609434218613702654,
+#### 	int64_bits_to_float(4609434218613702654),
+#### 	float_to_int64_bits(int64_bits_to_float(4609434218613702654)),
+#### 	'1.499999999999999555911e+00',
+#### 	1.499999999999999555911e+00,
+#### 	4609434218613702654 = float_to_int64_bits(int64_bits_to_float(4609434218613702654)));
+#### SELECT * FROM t4 WHERE i = 4609434218613702654;
+#### 
+#### INSERT INTO t4 VALUES(4609434218613702655,
+#### 	int64_bits_to_float(4609434218613702655),
+#### 	float_to_int64_bits(int64_bits_to_float(4609434218613702655)),
+#### 	'1.499999999999999777955e+00',
+#### 	1.499999999999999777955e+00,
+#### 	4609434218613702655 = float_to_int64_bits(int64_bits_to_float(4609434218613702655)));
+#### SELECT * FROM t4 WHERE i = 4609434218613702655;
+#### 
+#### INSERT INTO t4 VALUES(4609434218613702656,
+#### 	int64_bits_to_float(4609434218613702656),
+#### 	float_to_int64_bits(int64_bits_to_float(4609434218613702656)),
+#### 	'1.500000000000000000000e+00',
+#### 	1.500000000000000000000e+00,
+#### 	4609434218613702656 = float_to_int64_bits(int64_bits_to_float(4609434218613702656)));
+#### SELECT * FROM t4 WHERE i = 4609434218613702656;
+#### 
+#### INSERT INTO t4 VALUES(4609434218613702657,
+#### 	int64_bits_to_float(4609434218613702657),
+#### 	float_to_int64_bits(int64_bits_to_float(4609434218613702657)),
+#### 	'1.500000000000000222045e+00',
+#### 	1.500000000000000222045e+00,
+#### 	4609434218613702657 = float_to_int64_bits(int64_bits_to_float(4609434218613702657)));
+#### SELECT * FROM t4 WHERE i = 4609434218613702657;
+#### 
+#### INSERT INTO t4 VALUES(4611686018427387902,
+#### 	int64_bits_to_float(4611686018427387902),
+#### 	float_to_int64_bits(int64_bits_to_float(4611686018427387902)),
+#### 	'1.999999999999999555911e+00',
+#### 	1.999999999999999555911e+00,
+#### 	4611686018427387902 = float_to_int64_bits(int64_bits_to_float(4611686018427387902)));
+#### SELECT * FROM t4 WHERE i = 4611686018427387902;
+#### 
+#### INSERT INTO t4 VALUES(4611686018427387903,
+#### 	int64_bits_to_float(4611686018427387903),
+#### 	float_to_int64_bits(int64_bits_to_float(4611686018427387903)),
+#### 	'1.999999999999999777955e+00',
+#### 	1.999999999999999777955e+00,
+#### 	4611686018427387903 = float_to_int64_bits(int64_bits_to_float(4611686018427387903)));
+#### SELECT * FROM t4 WHERE i = 4611686018427387903;
+#### 
+#### INSERT INTO t4 VALUES(4611686018427387904,
+#### 	int64_bits_to_float(4611686018427387904),
+#### 	float_to_int64_bits(int64_bits_to_float(4611686018427387904)),
+#### 	'2.000000000000000000000e+00',
+#### 	2.000000000000000000000e+00,
+#### 	4611686018427387904 = float_to_int64_bits(int64_bits_to_float(4611686018427387904)));
+#### SELECT * FROM t4 WHERE i = 4611686018427387904;
+#### 
+#### INSERT INTO t4 VALUES(4611686018427387905,
+#### 	int64_bits_to_float(4611686018427387905),
+#### 	float_to_int64_bits(int64_bits_to_float(4611686018427387905)),
+#### 	'2.000000000000000444089e+00',
+#### 	2.000000000000000444089e+00,
+#### 	4611686018427387905 = float_to_int64_bits(int64_bits_to_float(4611686018427387905)));
+#### SELECT * FROM t4 WHERE i = 4611686018427387905;
+#### 
+#### INSERT INTO t4 VALUES(4613937818241073150,
+#### 	int64_bits_to_float(4613937818241073150),
+#### 	float_to_int64_bits(int64_bits_to_float(4613937818241073150)),
+#### 	'2.999999999999999111822e+00',
+#### 	2.999999999999999111822e+00,
+#### 	4613937818241073150 = float_to_int64_bits(int64_bits_to_float(4613937818241073150)));
+#### SELECT * FROM t4 WHERE i = 4613937818241073150;
+#### 
+#### INSERT INTO t4 VALUES(4613937818241073151,
+#### 	int64_bits_to_float(4613937818241073151),
+#### 	float_to_int64_bits(int64_bits_to_float(4613937818241073151)),
+#### 	'2.999999999999999555911e+00',
+#### 	2.999999999999999555911e+00,
+#### 	4613937818241073151 = float_to_int64_bits(int64_bits_to_float(4613937818241073151)));
+#### SELECT * FROM t4 WHERE i = 4613937818241073151;
+#### 
+#### INSERT INTO t4 VALUES(4613937818241073152,
+#### 	int64_bits_to_float(4613937818241073152),
+#### 	float_to_int64_bits(int64_bits_to_float(4613937818241073152)),
+#### 	'3.000000000000000000000e+00',
+#### 	3.000000000000000000000e+00,
+#### 	4613937818241073152 = float_to_int64_bits(int64_bits_to_float(4613937818241073152)));
+#### SELECT * FROM t4 WHERE i = 4613937818241073152;
+#### 
+#### INSERT INTO t4 VALUES(4613937818241073153,
+#### 	int64_bits_to_float(4613937818241073153),
+#### 	float_to_int64_bits(int64_bits_to_float(4613937818241073153)),
+#### 	'3.000000000000000444089e+00',
+#### 	3.000000000000000444089e+00,
+#### 	4613937818241073153 = float_to_int64_bits(int64_bits_to_float(4613937818241073153)));
+#### SELECT * FROM t4 WHERE i = 4613937818241073153;
+#### 
+#### INSERT INTO t4 VALUES(4616189618054758398,
+#### 	int64_bits_to_float(4616189618054758398),
+#### 	float_to_int64_bits(int64_bits_to_float(4616189618054758398)),
+#### 	'3.999999999999999111822e+00',
+#### 	3.999999999999999111822e+00,
+#### 	4616189618054758398 = float_to_int64_bits(int64_bits_to_float(4616189618054758398)));
+#### SELECT * FROM t4 WHERE i = 4616189618054758398;
+#### 
+#### INSERT INTO t4 VALUES(4616189618054758399,
+#### 	int64_bits_to_float(4616189618054758399),
+#### 	float_to_int64_bits(int64_bits_to_float(4616189618054758399)),
+#### 	'3.999999999999999555911e+00',
+#### 	3.999999999999999555911e+00,
+#### 	4616189618054758399 = float_to_int64_bits(int64_bits_to_float(4616189618054758399)));
+#### SELECT * FROM t4 WHERE i = 4616189618054758399;
+#### 
+#### INSERT INTO t4 VALUES(4616189618054758400,
+#### 	int64_bits_to_float(4616189618054758400),
+#### 	float_to_int64_bits(int64_bits_to_float(4616189618054758400)),
+#### 	'4.000000000000000000000e+00',
+#### 	4.000000000000000000000e+00,
+#### 	4616189618054758400 = float_to_int64_bits(int64_bits_to_float(4616189618054758400)));
+#### SELECT * FROM t4 WHERE i = 4616189618054758400;
+#### 
+#### INSERT INTO t4 VALUES(4616189618054758401,
+#### 	int64_bits_to_float(4616189618054758401),
+#### 	float_to_int64_bits(int64_bits_to_float(4616189618054758401)),
+#### 	'4.000000000000000888178e+00',
+#### 	4.000000000000000888178e+00,
+#### 	4616189618054758401 = float_to_int64_bits(int64_bits_to_float(4616189618054758401)));
+#### SELECT * FROM t4 WHERE i = 4616189618054758401;
+#### 
+#### INSERT INTO t4 VALUES(4618441417868443646,
+#### 	int64_bits_to_float(4618441417868443646),
+#### 	float_to_int64_bits(int64_bits_to_float(4618441417868443646)),
+#### 	'5.999999999999998223643e+00',
+#### 	5.999999999999998223643e+00,
+#### 	4618441417868443646 = float_to_int64_bits(int64_bits_to_float(4618441417868443646)));
+#### SELECT * FROM t4 WHERE i = 4618441417868443646;
+#### 
+#### INSERT INTO t4 VALUES(4618441417868443647,
+#### 	int64_bits_to_float(4618441417868443647),
+#### 	float_to_int64_bits(int64_bits_to_float(4618441417868443647)),
+#### 	'5.999999999999999111822e+00',
+#### 	5.999999999999999111822e+00,
+#### 	4618441417868443647 = float_to_int64_bits(int64_bits_to_float(4618441417868443647)));
+#### SELECT * FROM t4 WHERE i = 4618441417868443647;
+#### 
+#### INSERT INTO t4 VALUES(4618441417868443648,
+#### 	int64_bits_to_float(4618441417868443648),
+#### 	float_to_int64_bits(int64_bits_to_float(4618441417868443648)),
+#### 	'6.000000000000000000000e+00',
+#### 	6.000000000000000000000e+00,
+#### 	4618441417868443648 = float_to_int64_bits(int64_bits_to_float(4618441417868443648)));
+#### SELECT * FROM t4 WHERE i = 4618441417868443648;
+#### 
+#### INSERT INTO t4 VALUES(4618441417868443649,
+#### 	int64_bits_to_float(4618441417868443649),
+#### 	float_to_int64_bits(int64_bits_to_float(4618441417868443649)),
+#### 	'6.000000000000000888178e+00',
+#### 	6.000000000000000888178e+00,
+#### 	4618441417868443649 = float_to_int64_bits(int64_bits_to_float(4618441417868443649)));
+#### SELECT * FROM t4 WHERE i = 4618441417868443649;
+#### 
+#### INSERT INTO t4 VALUES(4620693217682128894,
+#### 	int64_bits_to_float(4620693217682128894),
+#### 	float_to_int64_bits(int64_bits_to_float(4620693217682128894)),
+#### 	'7.999999999999998223643e+00',
+#### 	7.999999999999998223643e+00,
+#### 	4620693217682128894 = float_to_int64_bits(int64_bits_to_float(4620693217682128894)));
+#### SELECT * FROM t4 WHERE i = 4620693217682128894;
+#### 
+#### INSERT INTO t4 VALUES(4620693217682128895,
+#### 	int64_bits_to_float(4620693217682128895),
+#### 	float_to_int64_bits(int64_bits_to_float(4620693217682128895)),
+#### 	'7.999999999999999111822e+00',
+#### 	7.999999999999999111822e+00,
+#### 	4620693217682128895 = float_to_int64_bits(int64_bits_to_float(4620693217682128895)));
+#### SELECT * FROM t4 WHERE i = 4620693217682128895;
+#### 
+#### INSERT INTO t4 VALUES(9214364837600034816,
+#### 	int64_bits_to_float(9214364837600034816),
+#### 	float_to_int64_bits(int64_bits_to_float(9214364837600034816)),
+#### 	'8.988465674311579538647e+307',
+#### 	8.988465674311579538647e+307,
+#### 	9214364837600034816 = float_to_int64_bits(int64_bits_to_float(9214364837600034816)));
+#### SELECT * FROM t4 WHERE i = 9214364837600034816;
+#### 
+#### INSERT INTO t4 VALUES(9214364837600034817,
+#### 	int64_bits_to_float(9214364837600034817),
+#### 	float_to_int64_bits(int64_bits_to_float(9214364837600034817)),
+#### 	'8.988465674311581534487e+307',
+#### 	8.988465674311581534487e+307,
+#### 	9214364837600034817 = float_to_int64_bits(int64_bits_to_float(9214364837600034817)));
+#### SELECT * FROM t4 WHERE i = 9214364837600034817;
+#### 
+#### INSERT INTO t4 VALUES(9216616637413720062,
+#### 	int64_bits_to_float(9216616637413720062),
+#### 	float_to_int64_bits(int64_bits_to_float(9216616637413720062)),
+#### 	'1.348269851146736531629e+308',
+#### 	1.348269851146736531629e+308,
+#### 	9216616637413720062 = float_to_int64_bits(int64_bits_to_float(9216616637413720062)));
+#### SELECT * FROM t4 WHERE i = 9216616637413720062;
+#### 
+#### INSERT INTO t4 VALUES(9216616637413720063,
+#### 	int64_bits_to_float(9216616637413720063),
+#### 	float_to_int64_bits(int64_bits_to_float(9216616637413720063)),
+#### 	'1.348269851146736731213e+308',
+#### 	1.348269851146736731213e+308,
+#### 	9216616637413720063 = float_to_int64_bits(int64_bits_to_float(9216616637413720063)));
+#### SELECT * FROM t4 WHERE i = 9216616637413720063;
+#### 
+#### INSERT INTO t4 VALUES(9216616637413720064,
+#### 	int64_bits_to_float(9216616637413720064),
+#### 	float_to_int64_bits(int64_bits_to_float(9216616637413720064)),
+#### 	'1.348269851146736930797e+308',
+#### 	1.348269851146736930797e+308,
+#### 	9216616637413720064 = float_to_int64_bits(int64_bits_to_float(9216616637413720064)));
+#### SELECT * FROM t4 WHERE i = 9216616637413720064;
+#### 
+#### INSERT INTO t4 VALUES(9216616637413720065,
+#### 	int64_bits_to_float(9216616637413720065),
+#### 	float_to_int64_bits(int64_bits_to_float(9216616637413720065)),
+#### 	'1.348269851146737130381e+308',
+#### 	1.348269851146737130381e+308,
+#### 	9216616637413720065 = float_to_int64_bits(int64_bits_to_float(9216616637413720065)));
+#### SELECT * FROM t4 WHERE i = 9216616637413720065;
+#### 
+#### INSERT INTO t4 VALUES(9218868437227405310,
+#### 	int64_bits_to_float(9218868437227405310),
+#### 	float_to_int64_bits(int64_bits_to_float(9218868437227405310)),
+#### 	'1.797693134862315508561e+308',
+#### 	1.797693134862315508561e+308,
+#### 	9218868437227405310 = float_to_int64_bits(int64_bits_to_float(9218868437227405310)));
+#### SELECT * FROM t4 WHERE i = 9218868437227405310;
+#### 
+#### INSERT INTO t4 VALUES(9218868437227405311,
+#### 	int64_bits_to_float(9218868437227405311),
+#### 	float_to_int64_bits(int64_bits_to_float(9218868437227405311)),
+#### 	'1.797693134862315708145e+308',
+#### 	1.797693134862315708145e+308,
+#### 	9218868437227405311 = float_to_int64_bits(int64_bits_to_float(9218868437227405311)));
+#### SELECT * FROM t4 WHERE i = 9218868437227405311;
+#### 
+#### INSERT INTO t4 VALUES(9218868437227405312,
+#### 	int64_bits_to_float(9218868437227405312),
+#### 	float_to_int64_bits(int64_bits_to_float(9218868437227405312)),
+#### 	'inf',
+#### 	inf,
+#### 	9218868437227405312 = float_to_int64_bits(int64_bits_to_float(9218868437227405312)));
+#### SELECT * FROM t4 WHERE i = 9218868437227405312;
+#### 
+#### INSERT INTO t4 VALUES(9218868437227405313,
+#### 	int64_bits_to_float(9218868437227405313),
+#### 	float_to_int64_bits(int64_bits_to_float(9218868437227405313)),
+#### 	'nan',
+#### 	nan,
+#### 	9218868437227405313 = float_to_int64_bits(int64_bits_to_float(9218868437227405313)));
+#### SELECT * FROM t4 WHERE i = 9218868437227405313;
+#### 
+#### INSERT INTO t4 VALUES(9221120237041090558,
+#### 	int64_bits_to_float(9221120237041090558),
+#### 	float_to_int64_bits(int64_bits_to_float(9221120237041090558)),
+#### 	'nan',
+#### 	nan,
+#### 	9221120237041090558 = float_to_int64_bits(int64_bits_to_float(9221120237041090558)));
+#### SELECT * FROM t4 WHERE i = 9221120237041090558;
+#### 
+#### INSERT INTO t4 VALUES(9221120237041090559,
+#### 	int64_bits_to_float(9221120237041090559),
+#### 	float_to_int64_bits(int64_bits_to_float(9221120237041090559)),
+#### 	'nan',
+#### 	nan,
+#### 	9221120237041090559 = float_to_int64_bits(int64_bits_to_float(9221120237041090559)));
+#### SELECT * FROM t4 WHERE i = 9221120237041090559;
+#### 
+#### INSERT INTO t4 VALUES(9221120237041090560,
+#### 	int64_bits_to_float(9221120237041090560),
+#### 	float_to_int64_bits(int64_bits_to_float(9221120237041090560)),
+#### 	'nan',
+#### 	nan,
+#### 	9221120237041090560 = float_to_int64_bits(int64_bits_to_float(9221120237041090560)));
+#### SELECT * FROM t4 WHERE i = 9221120237041090560;
+#### 
+#### INSERT INTO t4 VALUES(9221120237041090561,
+#### 	int64_bits_to_float(9221120237041090561),
+#### 	float_to_int64_bits(int64_bits_to_float(9221120237041090561)),
+#### 	'nan',
+#### 	nan,
+#### 	9221120237041090561 = float_to_int64_bits(int64_bits_to_float(9221120237041090561)));
+#### SELECT * FROM t4 WHERE i = 9221120237041090561;
+#### 
+#### INSERT INTO t4 VALUES(9223372036854775806,
+#### 	int64_bits_to_float(9223372036854775806),
+#### 	float_to_int64_bits(int64_bits_to_float(9223372036854775806)),
+#### 	'nan',
+#### 	nan,
+#### 	9223372036854775806 = float_to_int64_bits(int64_bits_to_float(9223372036854775806)));
+#### SELECT * FROM t4 WHERE i = 9223372036854775806;
+#### 
+#### INSERT INTO t4 VALUES(9223372036854775807,
+#### 	int64_bits_to_float(9223372036854775807),
+#### 	float_to_int64_bits(int64_bits_to_float(9223372036854775807)),
+#### 	'nan',
+#### 	nan,
+#### 	9223372036854775807 = float_to_int64_bits(int64_bits_to_float(9223372036854775807)));
+#### SELECT * FROM t4 WHERE i = 9223372036854775807;
+#### 
+# clean up
+DROP TABLE t1;
+DROP TABLE t2;
+DROP TABLE g1;
+DROP TABLE t3;
+#DROP TABLE t4;
