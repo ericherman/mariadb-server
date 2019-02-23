@@ -4497,6 +4497,23 @@ int Field_float::store(longlong nr, bool unsigned_val)
 }
 
 
+int Field_float::store_native(const Native &value)
+{
+  DBUG_ASSERT(sizeof(float) == value.length());
+  float f;
+  float4get(f, value.ptr());
+  store(f);
+  return 0;
+}
+
+
+bool Field_float::val_native(Native *to)
+{
+  to->set((char *)ptr, sizeof(float));
+  return 0;
+}
+
+
 double Field_float::val_real(void)
 {
   ASSERT_COLUMN_MARKED_FOR_READ;
@@ -4673,6 +4690,24 @@ int Field_double::store(longlong nr, bool unsigned_val)
   return Field_double::store(unsigned_val ? ulonglong2double((ulonglong) nr) :
                              (double) nr);
 }
+
+
+int Field_double::store_native(const Native &value)
+{
+  DBUG_ASSERT(sizeof(double) == value.length());
+  double d;
+  float8get(d, value.ptr());
+  store(d);
+  return 0;
+}
+
+
+bool Field_double::val_native(Native *to)
+{
+  to->set((char *)ptr, sizeof(double));
+  return 0;
+}
+
 
 /*
   If a field has fixed length, truncate the double argument pointed to by 'nr'

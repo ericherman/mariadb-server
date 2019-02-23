@@ -2486,10 +2486,12 @@ public:
   int store(const char *to,size_t length,CHARSET_INFO *charset);
   int store(double nr);
   int store(longlong nr, bool unsigned_val);
+  int store_native(const Native &value);
   int reset(void) { bzero(ptr,sizeof(float)); return 0; }
   double val_real(void);
   longlong val_int(void);
   String *val_str(String*,String *);
+  bool val_native(Native *to);
   bool send_binary(Protocol *protocol);
   int cmp(const uchar *,const uchar *);
   void sort_string(uchar *buff,uint length);
@@ -2543,11 +2545,13 @@ public:
   int  store(const char *to,size_t length,CHARSET_INFO *charset);
   int  store(double nr);
   int  store(longlong nr, bool unsigned_val);
+  int store_native(const Native &value);
   int reset(void) { bzero(ptr,sizeof(double)); return 0; }
   double val_real(void);
   longlong val_int(void) { return val_int_from_real(false); }
   ulonglong val_uint(void) { return (ulonglong) val_int_from_real(true); }
   String *val_str(String*,String *);
+  bool val_native(Native *to);
   bool send_binary(Protocol *protocol);
   int cmp(const uchar *,const uchar *);
   void sort_string(uchar *buff,uint length);
