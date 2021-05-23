@@ -50,16 +50,6 @@ https://datatracker.ietf.org/doc/html/draft-staykov-hu-json-canonical-form-00
 // JSON ARRAY (array values)
 // JSON LITERAL (number, literal (true, false, null), string)
 
-enum json_temp_type {
-  JTT_NOTHING= 0,
-  JTT_TRUE,
-  JTT_FALSE,
-  JTT_NULL,
-  JTT_NUMBER,
-  JTT_STRING,
-  JTT_ARRAY,
-  JTT_OBJECT
-};
 
 struct json_temp_string { /* this covers both keys and values as strings */
   size_t buf_size;
@@ -79,7 +69,7 @@ struct json_temp_object {
 };
 
 struct json_temp_value {
-  enum json_temp_type type;
+  enum json_value_types type;
   union {
     double number;
     struct json_temp_string string;
@@ -166,7 +156,7 @@ static int
 json_temp_value_type_string_init(struct json_temp_value *ret,
                                  const char *str, size_t len)
 {
-  ret->type= JTT_STRING;
+  ret->type= JSON_VALUE_STRING;
   return json_temp_string_init(&ret->value.string, str, len);
 }
 
@@ -174,12 +164,12 @@ static void
 json_temp_free(struct json_temp_value *v)
 {
   switch (v->type) {
-  case JTT_ARRAY:
+  case JSON_VALUE_ARRAY:
   {
     DBUG_ASSERT(0);
     break;
   }
-  case JTT_OBJECT:
+  case JSON_VALUE_OBJECT:
   {
     size_t i;
     struct json_temp_object *obj= &v->value.object;
@@ -198,9 +188,15 @@ json_temp_free(struct json_temp_value *v)
     delete_dynamic(values_arr);
     break;
   }
-  case JTT_STRING:
+  case JSON_VALUE_STRING:
   {
     my_free(v->value.string.buf);
+    break;
+  }
+  case JSON_VALUE_NULL:
+  case JSON_VALUE_TRUE:
+  case JSON_VALUE_FALSE:
+  {
     break;
   }
   default:
@@ -220,7 +216,7 @@ json_temp_to_string(char *buf, size_t size, struct json_temp_value *v)
 
   switch (v->type)
   {
-  case JTT_OBJECT:
+  case JSON_VALUE_OBJECT:
   {
     strcat(buf, "{");
     /* TODO: for now ASSUME v is of type object. */
@@ -243,12 +239,28 @@ json_temp_to_string(char *buf, size_t size, struct json_temp_value *v)
     strcat(buf, "}");
     break;
   }
-  case JTT_STRING:
+  case JSON_VALUE_STRING:
   {
     /*TODO string escaping ? */
     strcat(buf, (const char *)v->value.string.buf);
     break;
   }
+  case JSON_VALUE_NULL:
+  {
+    strcat(buf, "null");
+    break;
+  }
+  case JSON_VALUE_TRUE:
+  {
+    strcat(buf, "true");
+    break;
+  }
+  case JSON_VALUE_FALSE:
+  {
+    strcat(buf, "false");
+    break;
+  }
+
   default:
     DBUG_ASSERT(0);
   }
@@ -317,24 +329,35 @@ int json_normalize(char *buf, size_t buf_size, const uchar *s, size_t size,
     case JST_VALUE:
       if (json_read_value(&je))
         goto json_normalize_error;
-      if (root.type == JTT_NOTHING) {
+      if (root.type == JSON_VALUE_UNINITIALIZED) {
         if (json_value_scalar(&je))
         {
           /* TODO fix in tests. */
-          DBUG_ASSERT(0);
+          root.type= je.value_type;
+          if (root.type == JSON_VALUE_STRING)
+          {
+            size_t je_value_len= (je.value_end - je.value_begin);
+            json_temp_value_type_string_init(&root,
+                                             (const char *)je.value_begin,
+                                             je_value_len);
+          }
+          if (root.type == JSON_VALUE_NUMBER)
+          {
+            DBUG_ASSERT(0);
+          }
           break;
         }
 
         if (je.value_type == JSON_VALUE_OBJECT)
         {
-          root.type= JTT_OBJECT;
+          root.type= JSON_VALUE_OBJECT;
           json_temp_object_init(&root.value.object);
         }
         else
         {
           DBUG_ASSERT(0);
           /*
-          root.type= JTT_ARRAY;
+          root.type= JSON_VALUE_ARRAY;
           json_temp_array_init(&root.value.array);
           */
         }
@@ -349,14 +372,14 @@ int json_normalize(char *buf, size_t buf_size, const uchar *s, size_t size,
 
       if (je.value_type == JSON_VALUE_OBJECT)
       {
-        root.type= JTT_OBJECT;
+        root.type= JSON_VALUE_OBJECT;
         json_temp_object_init(&root.value.object);
       }
       else
       {
         DBUG_ASSERT(0);
         /*
-           root.type= JTT_ARRAY;
+           root.type= JSON_VALUE_ARRAY;
            json_temp_array_init(&root.value.array);
          */
       }
@@ -396,15 +419,8 @@ json_normalize_error:
 }
 
 static void
-test_json_normalize(void)
+check_json_normalize(const char *in, const char *expected)
 {
-  const char *in= ""
-  "{\n"
-  "  \"foo\": \"value\"\n"
-  "}\n";
-
-  const char *expected= "{\"foo\":\"value\"}";
-
   const size_t actual_size= 40;
   char actual[40]; /* C89 */
 
@@ -421,13 +437,34 @@ test_json_normalize(void)
   ok(strcmp(expected, actual) == 0, msg);
 }
 
+static void test_json_normalize_single_kv(void)
+{
+  const char *in= ""
+  "{\n"
+  "  \"foo\": \"value\"\n"
+  "}\n";
+
+  const char *expected= "{\"foo\":\"value\"}";
+  check_json_normalize(in, expected);
+}
+
+static void test_json_normalize_values(void)
+{
+  check_json_normalize("\"foo\"", "\"foo\"");
+  check_json_normalize("true", "true");
+  check_json_normalize("false", "false");
+  check_json_normalize("null", "null");
+}
+
+
 int main(void)
 {
 
-  plan(2);
+  plan(10);
   diag("Testing json_normalization.");
 
-  test_json_normalize();
+  test_json_normalize_values();
+  test_json_normalize_single_kv();
 
   return exit_status();
 }
