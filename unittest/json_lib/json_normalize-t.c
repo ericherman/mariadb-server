@@ -46,14 +46,9 @@ https://datatracker.ietf.org/doc/html/draft-staykov-hu-json-canonical-form-00
      codepoint values.
 */
 
-// JSON_OBJECT (array keys, array values)
-// JSON ARRAY (array values)
-// JSON LITERAL (number, literal (true, false, null), string)
-
-
 struct json_temp_string { /* this covers both keys and values as strings */
   size_t buf_size;
-  uchar *buf;
+  char *buf;
 };
 
 struct json_temp_array {
@@ -62,10 +57,8 @@ struct json_temp_array {
 };
 
 struct json_temp_object {
-  /* struct json_temp_string *keys; */
-  DYNAMIC_ARRAY keys;
-  /* struct json_temp_value  *values; */
-  DYNAMIC_ARRAY values;
+  /* PAIR(struct json_temp_string, struct json_temp_value) */
+  DYNAMIC_ARRAY kv_pairs;
 };
 
 struct json_temp_value {
@@ -78,6 +71,12 @@ struct json_temp_value {
   } value;
 };
 
+struct json_temp_kv {
+  struct json_temp_string key;
+  struct json_temp_value  value;
+};
+
+
 
 static void *json_temp_malloc(size_t size)
 {
@@ -86,20 +85,12 @@ static void *json_temp_malloc(size_t size)
 
 int json_temp_object_init(struct json_temp_object *obj)
 {
-  int err;
   uint init_alloc= 20;
   uint alloc_increment= 20;
-  size_t element_size= sizeof(struct json_temp_string);
-  err= my_init_dynamic_array(PSI_NOT_INSTRUMENTED, &obj->keys, element_size,
-         init_alloc, alloc_increment, MYF(MY_THREAD_SPECIFIC|MY_WME));
-  element_size= sizeof(struct json_temp_value);
-  err|= my_init_dynamic_array(PSI_NOT_INSTRUMENTED, &obj->values, element_size,
-          init_alloc, alloc_increment, MYF(MY_THREAD_SPECIFIC|MY_WME));
-  if (err) {
-    delete_dynamic(&obj->keys);
-    delete_dynamic(&obj->values);
-  }
-  return err;
+  size_t element_size= sizeof(struct json_temp_kv);
+  return my_init_dynamic_array(PSI_NOT_INSTRUMENTED, &obj->kv_pairs,
+         element_size, init_alloc, alloc_increment,
+         MYF(MY_THREAD_SPECIFIC|MY_WME));
 }
 
 int json_temp_array_init(struct json_temp_array *array)
@@ -128,26 +119,25 @@ int json_temp_string_init(struct json_temp_string *string,
 }
 
 static int
-json_temp_object_append_key_value(struct json_temp_object *obj, char *key, size_t key_len,
+json_temp_object_append_key_value(struct json_temp_object *obj,
+                                  char *key, size_t key_len,
                                   struct json_temp_value *v)
 {
-  struct json_temp_string json_key_str;
-  int err= json_temp_string_init(&json_key_str, key, key_len);
+  struct json_temp_kv pair;
+  int err= json_temp_string_init(&pair.key, key, key_len);
+
   if (err)
-    return err;
-  err|= insert_dynamic(&obj->keys, &json_key_str);
+    return 1;
+
+  pair.value= *v;
+
+  err|= insert_dynamic(&obj->kv_pairs, &pair);
   if (err)
   {
-    /* TODO: Free json_temp_string. */
+    my_free(pair.key.buf);
     return 1;
   }
 
-  err|= insert_dynamic(&obj->values, v);
-  if (err)
-  {
-    /* TODO: Free json_temp_string. and prev array. */
-    return 1;
-  }
   return 0;
 }
 
@@ -169,18 +159,15 @@ json_temp_free(struct json_temp_value *v)
     size_t i;
     struct json_temp_object *obj= &v->value.object;
 
-    DYNAMIC_ARRAY *keys_arr= &obj->keys;
-    DYNAMIC_ARRAY *values_arr= &obj->values;
-    for (i= 0; i < obj->keys.elements; ++i)
+    DYNAMIC_ARRAY *pairs_arr= &obj->kv_pairs;
+    for (i= 0; i < pairs_arr->elements; ++i)
     {
-      char *key = (char *)((struct json_temp_string *) keys_arr->buffer)[i].buf;
-      struct json_temp_value *jt_value= ((struct json_temp_value *) values_arr->buffer) + i;
-
+      struct json_temp_kv *kv= dynamic_element(pairs_arr, i, struct json_temp_kv *);
+      char *key = kv->key.buf;
       my_free(key);
-      json_temp_free(jt_value);
+      json_temp_free(&kv->value);
     }
-    delete_dynamic(keys_arr);
-    delete_dynamic(values_arr);
+    delete_dynamic(pairs_arr);
     break;
   }
   case JSON_VALUE_ARRAY:
@@ -233,25 +220,24 @@ json_temp_to_string(char *buf, size_t size, struct json_temp_value *v)
   case JSON_VALUE_OBJECT:
   {
     size_t i, used_buf_len;
-    struct json_temp_object *obj;
+    struct json_temp_object *obj= &v->value.object;
+    DYNAMIC_ARRAY *pairs_arr= &obj->kv_pairs;
 
     strcat(buf, "{");
-    /* TODO: for now ASSUME v is of type object. */
-    obj= &v->value.object;
 
-    for (i= 0; i < obj->keys.elements; ++i)
+    for (i= 0; i < pairs_arr->elements; ++i)
     {
-      DYNAMIC_ARRAY *keys_arr= &obj->keys;
-      DYNAMIC_ARRAY *values_arr= &obj->values;
-      struct json_temp_value *jt_value= ((struct json_temp_value *) values_arr->buffer) + i;
+      struct json_temp_kv *kv;
+      kv= dynamic_element(pairs_arr, i, struct json_temp_kv *);
 
-      /* TODO: replace with a get_dynamic_ref when it exists */
       strcat(buf, "\"");
-      strcat(buf, (char *)((struct json_temp_string *) keys_arr->buffer)[i].buf);
+      strcat(buf, kv->key.buf);
       strcat(buf, "\":");
       used_buf_len= strlen(buf);
       /* TODO: watch out for buffer overflow. */
-      json_temp_to_string(buf + used_buf_len, size - used_buf_len, jt_value);
+      json_temp_to_string(buf + used_buf_len, size - used_buf_len, &kv->value);
+      if (i != (pairs_arr->elements - 1))
+       strcat(buf, ",");
     }
     strcat(buf, "}");
     break;
@@ -259,15 +245,17 @@ json_temp_to_string(char *buf, size_t size, struct json_temp_value *v)
   case JSON_VALUE_ARRAY:
   {
     size_t i, used_buf_len;
-    struct json_temp_array *arr = &v->value.array;
+    struct json_temp_array *arr= &v->value.array;
+    DYNAMIC_ARRAY *values_arr= &arr->values;
 
     strcat(buf, "[");
-    for (i= 0; i < arr->values.elements; ++i) {
-      DYNAMIC_ARRAY *values_arr= &arr->values;
-      struct json_temp_value *jt_value= ((struct json_temp_value *) values_arr->buffer) + i;
+    for (i= 0; i < values_arr->elements; ++i) {
+      struct json_temp_value *jt_value;
+      jt_value= dynamic_element(values_arr, i, struct json_temp_value *);
+
       used_buf_len= strlen(buf);
       json_temp_to_string(buf + used_buf_len, size - used_buf_len, jt_value);
-      if (i != (arr->values.elements - 1))
+      if (i != (values_arr->elements - 1))
        strcat(buf, ",");
     }
     strcat(buf, "]");
@@ -275,7 +263,6 @@ json_temp_to_string(char *buf, size_t size, struct json_temp_value *v)
   }
   case JSON_VALUE_STRING:
   {
-    /*TODO string escaping ? */
     strcat(buf, (const char *)v->value.string.buf);
     break;
   }
@@ -340,10 +327,12 @@ int json_normalize(char *buf, size_t buf_size, const uchar *s, size_t size,
     case JST_KEY:
       /* we have the key name */
       /* json_read_keyname_chr() */
+      key_len= 0;
       while (json_read_keyname_chr(&je) == 0)
       {
         key_buf[key_len++]= je.s.c_next;
       }
+      key_buf[key_len]= '\0';
 
       /* After reading the key, we have a follow-up value. */
       if (json_read_value(&je))
@@ -353,11 +342,17 @@ int json_normalize(char *buf, size_t buf_size, const uchar *s, size_t size,
         size_t je_value_len= (je.value_end - je.value_begin);
         struct json_temp_value jt_value;
 
-        json_temp_value_type_string_init(&jt_value, (const char *)je.value_begin,
-                                         je_value_len);
+        if (json_temp_value_type_string_init(&jt_value, (const char *)je.value_begin,
+                                             je_value_len))
+          goto json_normalize_error;
+
         /* TODO: differences between true/false/string. */
-        json_temp_object_append_key_value(&root.value.object /* todo should be current, not only root. */,
-                                          key_buf, key_len, &jt_value);
+        if (json_temp_object_append_key_value(&root.value.object /* todo should be current, not only root. */,
+                                              key_buf, key_len, &jt_value))
+        {
+          my_free(jt_value.value.string.buf);
+          goto json_normalize_error;
+        }
       }
       else
       {
@@ -454,17 +449,18 @@ int json_normalize(char *buf, size_t buf_size, const uchar *s, size_t size,
   return err;
 
 json_normalize_error:
+  DBUG_ASSERT(0);
   return 1; /* TODO don't leak. */
 }
 
 static void
 check_json_normalize(const char *in, const char *expected)
 {
-  const size_t actual_size= 40;
-  char actual[40]; /* C89 */
+  const size_t actual_size= 1024;
+  char actual[1024]; /* C89 */
 
-  const size_t msg_size= 100;
-  char msg[100]; /* C89 */
+  const size_t msg_size= 1024;
+  char msg[1024]; /* C89 */
 
   CHARSET_INFO *cs= &my_charset_utf8mb4_general_ci;
 
