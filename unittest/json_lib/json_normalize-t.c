@@ -150,6 +150,54 @@ json_temp_value_type_string_init(struct json_temp_value *ret,
   return json_temp_string_init(&ret->value.string, str, len);
 }
 
+static int json_temp_kv_comp(const struct json_temp_kv *a,
+                             const struct json_temp_kv *b)
+{
+  return strcmp(a->key.buf, b->key.buf);
+}
+
+static void
+json_temp_normalize_sort(struct json_temp_value *v)
+{
+  switch (v->type) {
+  case JSON_VALUE_OBJECT:
+  {
+    size_t i;
+    DYNAMIC_ARRAY *pairs= &v->value.object.kv_pairs;
+    for (i= 0; i < pairs->elements; ++i)
+    {
+      struct json_temp_kv *kv= dynamic_element(pairs, 0, struct json_temp_kv*);
+      json_temp_normalize_sort(&kv->value);
+    }
+
+    my_qsort((uchar*) dynamic_element(pairs, 0, struct json_temp_kv*),
+        pairs->elements, sizeof(struct json_temp_kv),
+        (qsort_cmp) json_temp_kv_comp);
+    break;
+  }
+  case JSON_VALUE_ARRAY:
+  {
+    /* Arrays in JSON must keep the order. Just recursively sort values. */
+    size_t i;
+    DYNAMIC_ARRAY *values= &v->value.array.values;
+    for (i= 0; i < values->elements; ++i)
+    {
+      struct json_temp_value *value;
+      value= dynamic_element(values, 0, struct json_temp_value*);
+      json_temp_normalize_sort(value);
+    }
+
+    break;
+  }
+  case JSON_VALUE_UNINITIALIZED:
+    DBUG_ASSERT(0);
+    break;
+  default: /* Nothing to do for other types. */
+    break;
+  }
+}
+
+
 static void
 json_temp_free(struct json_temp_value *v)
 {
@@ -438,10 +486,8 @@ int json_normalize(char *buf, size_t buf_size, const uchar *s, size_t size,
     };
   } while (json_scan_next(&je) == 0);
 
-  /* sort keys[], vals[] */
-  /* for each val in vals[] */
+  json_temp_normalize_sort(&root);
 
-  /* strcpy(buf, key_buf); */
   json_temp_to_string(buf, buf_size, &root);
 
   json_temp_free(&root);
@@ -494,15 +540,28 @@ static void test_json_normalize_values(void)
   check_json_normalize("[]", "[]");
 }
 
+static void test_json_normalize_multi_kv(void)
+{
+  const char *in = ""
+  "{\n"
+  "  \"foo\": \"value\",\n"
+  "  \"bar\": \"value2\"\n"
+  "}\n";
+
+  const char *expected= "{\"bar\":\"value2\",\"foo\":\"value\"}";
+  check_json_normalize(in, expected);
+}
+
 
 int main(void)
 {
 
-  plan(16);
+  plan(18);
   diag("Testing json_normalization.");
 
   test_json_normalize_values();
   test_json_normalize_single_kv();
+  test_json_normalize_multi_kv();
 
   return exit_status();
 }
