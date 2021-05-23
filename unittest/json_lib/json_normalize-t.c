@@ -164,11 +164,6 @@ static void
 json_temp_free(struct json_temp_value *v)
 {
   switch (v->type) {
-  case JSON_VALUE_ARRAY:
-  {
-    DBUG_ASSERT(0);
-    break;
-  }
   case JSON_VALUE_OBJECT:
   {
     size_t i;
@@ -188,9 +183,29 @@ json_temp_free(struct json_temp_value *v)
     delete_dynamic(values_arr);
     break;
   }
+  case JSON_VALUE_ARRAY:
+  {
+    size_t i;
+    struct json_temp_array *arr= &v->value.array;
+
+    DYNAMIC_ARRAY *values_arr= &arr->values;
+    for (i= 0; i < arr->values.elements; ++i)
+    {
+      struct json_temp_value *jt_value= ((struct json_temp_value *) values_arr->buffer) + i;
+      json_temp_free(jt_value);
+    }
+    delete_dynamic(values_arr);
+
+    break;
+  }
   case JSON_VALUE_STRING:
   {
     my_free(v->value.string.buf);
+    break;
+  }
+  case JSON_VALUE_NUMBER:
+  {
+    DBUG_ASSERT(0);
     break;
   }
   case JSON_VALUE_NULL:
@@ -199,8 +214,9 @@ json_temp_free(struct json_temp_value *v)
   {
     break;
   }
-  default:
+  case JSON_VALUE_UNINITIALIZED:
     DBUG_ASSERT(0);
+    break;
   }
 }
 
@@ -208,8 +224,6 @@ json_temp_free(struct json_temp_value *v)
 static char *
 json_temp_to_string(char *buf, size_t size, struct json_temp_value *v)
 {
-  size_t i, used_buf_len;
-  struct json_temp_object *obj;
   DBUG_ASSERT(buf);
   DBUG_ASSERT(size);
   memset(buf, 0x00, size);
@@ -218,6 +232,9 @@ json_temp_to_string(char *buf, size_t size, struct json_temp_value *v)
   {
   case JSON_VALUE_OBJECT:
   {
+    size_t i, used_buf_len;
+    struct json_temp_object *obj;
+
     strcat(buf, "{");
     /* TODO: for now ASSUME v is of type object. */
     obj= &v->value.object;
@@ -237,6 +254,23 @@ json_temp_to_string(char *buf, size_t size, struct json_temp_value *v)
       json_temp_to_string(buf + used_buf_len, size - used_buf_len, jt_value);
     }
     strcat(buf, "}");
+    break;
+  }
+  case JSON_VALUE_ARRAY:
+  {
+    size_t i, used_buf_len;
+    struct json_temp_array *arr = &v->value.array;
+
+    strcat(buf, "[");
+    for (i= 0; i < arr->values.elements; ++i) {
+      DYNAMIC_ARRAY *values_arr= &arr->values;
+      struct json_temp_value *jt_value= ((struct json_temp_value *) values_arr->buffer) + i;
+      used_buf_len= strlen(buf);
+      json_temp_to_string(buf + used_buf_len, size - used_buf_len, jt_value);
+      if (i != (arr->values.elements - 1))
+       strcat(buf, ",");
+    }
+    strcat(buf, "]");
     break;
   }
   case JSON_VALUE_STRING:
@@ -260,9 +294,16 @@ json_temp_to_string(char *buf, size_t size, struct json_temp_value *v)
     strcat(buf, "false");
     break;
   }
-
-  default:
+  case JSON_VALUE_NUMBER:
+  {
     DBUG_ASSERT(0);
+    break;
+  }
+  case JSON_VALUE_UNINITIALIZED:
+  {
+    DBUG_ASSERT(0);
+    break;
+  }
   }
   return buf;
 }
@@ -355,11 +396,9 @@ int json_normalize(char *buf, size_t buf_size, const uchar *s, size_t size,
         }
         else
         {
-          DBUG_ASSERT(0);
-          /*
+          DBUG_ASSERT(je.value_type == JSON_VALUE_ARRAY);
           root.type= JSON_VALUE_ARRAY;
           json_temp_array_init(&root.value.array);
-          */
         }
         break;
       }
@@ -454,13 +493,16 @@ static void test_json_normalize_values(void)
   check_json_normalize("true", "true");
   check_json_normalize("false", "false");
   check_json_normalize("null", "null");
+  check_json_normalize("\"\"", "\"\"");
+  check_json_normalize("{}", "{}");
+  check_json_normalize("[]", "[]");
 }
 
 
 int main(void)
 {
 
-  plan(10);
+  plan(16);
   diag("Testing json_normalization.");
 
   test_json_normalize_values();
