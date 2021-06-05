@@ -231,7 +231,7 @@ json_temp_normalize_sort(struct json_temp_value *v)
     DYNAMIC_ARRAY *pairs= &v->value.object.kv_pairs;
     for (i= 0; i < pairs->elements; ++i)
     {
-      struct json_temp_kv *kv= dynamic_element(pairs, 0, struct json_temp_kv*);
+      struct json_temp_kv *kv= dynamic_element(pairs, i, struct json_temp_kv*);
       json_temp_normalize_sort(&kv->value);
     }
 
@@ -248,7 +248,7 @@ json_temp_normalize_sort(struct json_temp_value *v)
     for (i= 0; i < values->elements; ++i)
     {
       struct json_temp_value *value;
-      value= dynamic_element(values, 0, struct json_temp_value*);
+      value= dynamic_element(values, i, struct json_temp_value*);
       json_temp_normalize_sort(value);
     }
 
@@ -521,6 +521,17 @@ json_temp_append_to_array(struct json_temp_value *current,
     return err;
   }
   case JSON_VALUE_OBJECT:
+  {
+    tmp.type= je->value_type;
+    err= json_temp_object_init(&tmp.value.object);
+    if (err)
+      return err;
+    err= json_temp_array_append_value(&current->value.array, &tmp);
+    // TODO: remove some of this duplication
+    if (err)
+      json_temp_value_free(&tmp);
+    return err;
+  }
   case JSON_VALUE_NUMBER:
     DBUG_ASSERT(0);
     return 1;
@@ -663,8 +674,24 @@ int json_normalize(char *buf, size_t buf_size, const uchar *s, size_t size,
           kv= json_temp_object_get_last_element(&stack[current]->value.object);
           stack[current + 1]= &kv->value;
         } else { // JSON_VALUE_ARRAY
-          /* Need to handle arrays / objects recursively? */
-          DBUG_ASSERT(0);
+          struct json_temp_value arr; // Empty object.
+          struct json_temp_kv *kv;
+
+          DBUG_ASSERT(stack[current]->type == JSON_VALUE_OBJECT);
+          DBUG_ASSERT(je.value_type == JSON_VALUE_ARRAY);
+
+          arr.type = JSON_VALUE_ARRAY;
+          err= json_temp_array_init(&arr.value.array);
+
+          if (json_temp_object_append_key_value(&stack[current]->value.object,
+                                                key_buf, key_len, &arr))
+          {
+            /* TODO don't leak, free temp_array */
+            goto json_normalize_error;
+          }
+
+          kv= json_temp_object_get_last_element(&stack[current]->value.object);
+          stack[current + 1]= &kv->value;
         }
         current+= 1;
       }
@@ -679,24 +706,17 @@ int json_normalize(char *buf, size_t buf_size, const uchar *s, size_t size,
         break;
       }
 
-      // We can only hit this when we have an array of objects.
-      if (je.value_type == JSON_VALUE_OBJECT)
+      DBUG_ASSERT(stack[current]->type == JSON_VALUE_ARRAY);
+      DBUG_ASSERT(je.value_type == JSON_VALUE_ARRAY ||
+                  je.value_type == JSON_VALUE_OBJECT);
+
+      json_temp_append_to_array(stack[current], &je);
       {
-        DBUG_ASSERT(stack[current]->type == JSON_VALUE_ARRAY);
-        //json_temp_object_init(&current->value.object);
-        DBUG_ASSERT(0);
-      }
-      else
-      {
+        // TODO: Change compiler to use C11.
         struct json_temp_array *current_arr= &stack[current]->value.array;
-        DBUG_ASSERT(stack[current]->type == JSON_VALUE_ARRAY);
-        DBUG_ASSERT(je.value_type == JSON_VALUE_ARRAY);
-
-        json_temp_append_to_array(stack[current], &je);
-
         stack[current + 1]= json_temp_array_get_last_element(current_arr);
-        ++current;
       }
+      ++current;
 
 
       /* see the json_read_value() */
@@ -717,6 +737,7 @@ int json_normalize(char *buf, size_t buf_size, const uchar *s, size_t size,
     case JST_ARRAY_END:
       /* TODO: this needs to pop off the stack, as does JST_OBJ_END. */
       /* parser found the end of the array (the ']' in JSON) */
+      --current;
       break;
     };
   } while (json_scan_next(&je) == 0);
@@ -812,13 +833,13 @@ static void test_json_normalize_nested_objects(void)
 {
   const char *in = ""
   "{\n"
-  "  \"foo\": {\"value\":true},\n"
   "  \"wiz\": {\n"
-  "\t\t\"alpha\": \"a\",\n\t\t\"bang\": false\n\t}\n"
+  "\t\t\"bang\": \"a\",\n\t\t\"alpha\": false\n\t},\n"
+  "  \"foo\": {\"value\":true}\n"
   "}";
 
   const char *expected= "{\"foo\":{\"value\":true},"
-                        "\"wiz\":{\"alpha\":\"a\",\"bang\":false}}";
+                        "\"wiz\":{\"alpha\":false,\"bang\":\"a\"}}";
   check_json_normalize(in, expected);
 }
 
@@ -834,28 +855,38 @@ static void test_json_normalize_nested_arrays(void)
   check_json_normalize(in, expected);
 }
 
-#if 0
-static void test_json_normalize_nested_arrays(void)
+static void test_json_normalize_nested_deep(void)
 {
   const char *in = ""
   "{\n"
   "  \"foo\": \"value\",\n"
   "  \"wiz\": [true, false, {\n"
   "\t\t\"bang\": \"a\",\n\t\t\"alpha\": false\n\t},\n  \"string\",\n"
-  "\t{ \"b\": \"one\", \"a\": \"two\", \"b\": \"three\"}, false,\n"
+  "\t{ \"b\": \"one\", \"a\": \"two\", \"c\": \"three\"}, false,\n"
   "\t\t[\"z\", \"w\", \"x\"]],\n"
   "  \"bar\": \"value2\"\n"
   "}\n";
 
-  const char *expected= "TODO";
+  const char *expected= ""
+  "{"
+    "\"bar\":\"value2\","
+    "\"foo\":\"value\","
+    "\"wiz\":["
+               "true,false,"
+               "{\"alpha\":false,\"bang\":\"a\"},"
+               "\"string\","
+               "{\"a\":\"two\",\"b\":\"one\",\"c\":\"three\"},"
+               "false,"
+               "[\"z\",\"w\",\"x\"]"
+            "]"
+  "}";
   check_json_normalize(in, expected);
 }
-#endif
 
 int main(void)
 {
 
-  plan(40);
+  plan(42);
   diag("Testing json_normalization.");
 
   test_json_normalize_values();
@@ -864,6 +895,7 @@ int main(void)
   test_json_normalize_array();
   test_json_normalize_nested_objects();
   test_json_normalize_nested_arrays();
+  test_json_normalize_nested_deep();
 
   return exit_status();
 }
