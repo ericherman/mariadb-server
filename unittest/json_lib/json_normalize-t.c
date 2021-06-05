@@ -425,14 +425,16 @@ static int
 json_temp_append_to_array(struct json_temp_value *current,
                           json_engine_t *je)
 {
+  int err;
+  struct json_temp_value tmp;
+
   DBUG_ASSERT(current->type == JSON_VALUE_ARRAY);
   DBUG_ASSERT(je->value_type != JSON_VALUE_UNINITIALIZED);
+
   switch (je->value_type) {
   case JSON_VALUE_STRING:
   {
     size_t je_value_len= (je->value_end - je->value_begin);
-    struct json_temp_value tmp;
-    int err;
     err= json_temp_value_type_string_init(&tmp,
                                           (const char *)je->value_begin,
                                           je_value_len);
@@ -441,11 +443,15 @@ json_temp_append_to_array(struct json_temp_value *current,
     err= json_temp_array_append_value(&current->value.array, &tmp);
     if (err)
        json_temp_value_free(&tmp);
-		return err;
+    return err;
   }
   case JSON_VALUE_NULL:
   case JSON_VALUE_TRUE:
   case JSON_VALUE_FALSE:
+  {
+    tmp.type= je->value_type;
+    return json_temp_array_append_value(&current->value.array, &tmp);
+  }
   case JSON_VALUE_OBJECT:
   case JSON_VALUE_ARRAY:
   case JSON_VALUE_NUMBER:
@@ -657,8 +663,8 @@ static void test_json_normalize_multi_kv(void)
 
 static void test_json_normalize_array(void)
 {
-  const char *in= "[ \"a\", \"b\" ]";
-  const char *expected= "[\"a\",\"b\"]";
+  const char *in= "[ \"a\", \"b\", true, false, null ]";
+  const char *expected= "[\"a\",\"b\",true,false,null]";
   check_json_normalize(in, expected);
 }
 
