@@ -152,6 +152,18 @@ json_temp_object_append_key_value(struct json_temp_object *obj,
   return 0;
 }
 
+static struct json_temp_kv*
+json_temp_get_last_element(struct json_temp_object *obj)
+{
+  struct json_temp_kv *kv;
+
+  DBUG_ASSERT(obj->kv_pairs.elements > 0);
+  kv= dynamic_element(&obj->kv_pairs,
+                      obj->kv_pairs.elements - 1,
+                      struct json_temp_kv*);
+  return kv;
+}
+
 
 static int
 json_temp_array_append_value(struct json_temp_array *arr,
@@ -391,6 +403,24 @@ json_temp_to_string(char *buf, size_t size, struct json_temp_value *v)
 }
 
 static int
+json_temp_get_number_value(struct json_temp_value *current,
+                           json_engine_t *je)
+{
+  int err= 0;
+  const char *begin= (const char *)je->value_begin;
+  char *end= (char *)je->value_end;
+  double d= my_strtod(begin, &end, &err);
+  DBUG_ASSERT(d == d); /* NaN is not valid JSON */
+  /* https://datatracker.ietf.org/doc/html/rfc8259#section-6 */
+  if (err) {
+    return 1;
+  }
+  current->value.number= d;
+  return 0;
+}
+
+#if 0
+static int
 json_temp_store_current_value(struct json_temp_value *current,
                               json_engine_t *je)
 {
@@ -410,17 +440,7 @@ json_temp_store_current_value(struct json_temp_value *current,
     }
     case JSON_VALUE_NUMBER:
     {
-      int err= 0;
-      const char *begin= (const char *)je->value_begin;
-      char *end= (char *)je->value_end;
-      double d= my_strtod(begin, &end, &err);
-      DBUG_ASSERT(d == d); /* NaN is not valid JSON */
-      /* https://datatracker.ietf.org/doc/html/rfc8259#section-6 */
-      if (err) {
-        return 1;
-      }
-      current->value.number= d;
-      return 0;
+      return json_temp_get_number_value(current, je);
     }
     default: /* No value to be set for other types. */
       return 0;
@@ -441,6 +461,7 @@ json_temp_store_current_value(struct json_temp_value *current,
     }
   }
 }
+#endif
 
 static int
 json_temp_append_to_array(struct json_temp_value *current,
@@ -493,9 +514,9 @@ int json_normalize(char *buf, size_t buf_size, const uchar *s, size_t size,
   const size_t key_buf_size= 100;
   char key_buf[100]; /* TODO */
   size_t key_len= 0;
-  struct json_temp_value stack[JSON_DEPTH_LIMIT];
-  struct json_temp_value *root = stack;
-  struct json_temp_value *current = stack;
+  size_t current;
+  struct json_temp_value *stack[JSON_DEPTH_LIMIT];
+  struct json_temp_value root;
 
 
   DBUG_ASSERT(buf);
@@ -505,10 +526,56 @@ int json_normalize(char *buf, size_t buf_size, const uchar *s, size_t size,
   buf[0]= '\0';
   memset(key_buf, 0x00, key_buf_size);
   memset(&je, 0x00, sizeof(je));
-  memset(stack, 0x00, sizeof(stack)) ;
+  memset(stack, 0x00, sizeof(stack));
+  memset(&root, 0x00, sizeof(root));
+
+  root.type= JSON_VALUE_UNINITIALIZED;
+  current= 0;
+  stack[current]= &root;
 
   err= json_scan_start(&je, cs, s, s + size);
+  if (json_read_value(&je))
+    goto json_normalize_error;
 
+  root.type = je.value_type;
+  switch (root.type) {
+  case JSON_VALUE_OBJECT:
+    err= json_temp_object_init(&root.value.object);
+    if (err)
+      goto json_normalize_error; // TODO cleanup
+    break;
+  case JSON_VALUE_ARRAY:
+    err= json_temp_array_init(&root.value.array);
+    if (err)
+      goto json_normalize_error; // TODO cleanup
+    break;
+  case JSON_VALUE_STRING:
+  {
+    const char *je_value_begin= (const char *)je.value_begin;
+    size_t je_value_len= (je.value_end - je.value_begin);
+    if (json_temp_value_type_string_init(&root, je_value_begin, je_value_len))
+      goto json_normalize_error;
+    goto json_normalize_print_and_free;
+  }
+  case JSON_VALUE_NUMBER:
+  {
+    if (json_temp_get_number_value(&root, &je))
+      goto json_normalize_error;
+    goto json_normalize_print_and_free;
+  }
+  case JSON_VALUE_TRUE:
+  case JSON_VALUE_FALSE:
+  case JSON_VALUE_NULL:
+    goto json_normalize_print_and_free;
+  default:
+    DBUG_ASSERT(0);
+  }
+
+
+  /* Restart the scan now that we know the type of the root element. */
+  /*memset(&je, 0x00, sizeof(je));
+  err= json_scan_start(&je, cs, s, s + size);
+  */
   /* json_temp_malloc(DEFAULT_NUM_KEYS * sizeof(struct json_temp_string)); */
 
   /* first figure out the root */
@@ -517,6 +584,7 @@ int json_normalize(char *buf, size_t buf_size, const uchar *s, size_t size,
     switch (je.state)
     {
     case JST_KEY:
+      DBUG_ASSERT(stack[current]->type == JSON_VALUE_OBJECT);
       /* we have the key name */
       /* json_read_keyname_chr() */
       key_len= 0;
@@ -529,6 +597,7 @@ int json_normalize(char *buf, size_t buf_size, const uchar *s, size_t size,
       /* After reading the key, we have a follow-up value. */
       if (json_read_value(&je))
         goto json_normalize_error;
+
       // TODO: idea: Write code such that switch from below works regardless
       // of depth level.
       if (json_value_scalar(&je))
@@ -536,13 +605,12 @@ int json_normalize(char *buf, size_t buf_size, const uchar *s, size_t size,
         size_t je_value_len= (je.value_end - je.value_begin);
         struct json_temp_value jt_value;
         /* TODO: differences between true/false/string. */
-        /* TODO: FIXXXME: switch (je.value_type) { */
-        /* case (JSON_VALUE_STRING) { */
+        /* TODO: FIXXXME: switch (je.value_type) */
+        /* case (JSON_VALUE_STRING)  */
         if (json_temp_value_type_string_init(&jt_value, (const char *)je.value_begin,
                                              je_value_len))
           goto json_normalize_error;
-
-        if (json_temp_object_append_key_value(&current->value.object,
+        if (json_temp_object_append_key_value(&stack[current]->value.object,
                                               key_buf, key_len, &jt_value))
         {
           json_temp_string_free(&jt_value.value.string);
@@ -551,53 +619,52 @@ int json_normalize(char *buf, size_t buf_size, const uchar *s, size_t size,
       }
       else
       {
-        struct json_temp_value *next = current + 1;
+        /* TODO: Evaluate if checking for stack overflow is necessary,
+                 json_engine should already cover it. */
         DBUG_ASSERT(je.value_type == JSON_VALUE_ARRAY ||
                     je.value_type == JSON_VALUE_OBJECT);
-        next->type= je.value_type;
-        if (next->type == JSON_VALUE_OBJECT) {
-          struct json_temp_value obj;
+        if (je.value_type == JSON_VALUE_OBJECT)
+        {
+          struct json_temp_value obj; // Empty object.
+          struct json_temp_kv *kv;
           obj.type = JSON_VALUE_OBJECT;
           json_temp_object_init(&obj.value.object);
-          if (json_temp_object_append_key_value(&current->value.object,
+          if (json_temp_object_append_key_value(&stack[current]->value.object,
                                                 key_buf, key_len, &obj))
           {
             /* TODO don't leak */
             goto json_normalize_error;
           }
+          kv= json_temp_get_last_element(&stack[current]->value.object);
+          stack[current + 1]= &kv->value;
+        } else { // JSON_VALUE_ARRAY
+          /* Need to handle arrays / objects recursively? */
+          DBUG_ASSERT(0);
         }
-
-
-        DBUG_ASSERT(0);
-        /* Need to handle arrays / objects recursively? */
+        current+= 1;
       }
-
-
       break;
     case JST_VALUE:
       if (json_read_value(&je))
         goto json_normalize_error;
-      // This was initially for 'root' (base object)
-      if (current->type == JSON_VALUE_UNINITIALIZED)
-      {
-        // TODO error handling
-        json_temp_store_current_value(current, &je);
-        break;
-      }
       if (json_value_scalar(&je))
       {
         // TODO error handling
-        json_temp_append_to_array(current, &je);
+        json_temp_append_to_array(stack[current], &je);
         break;
       }
 
+      // We can only hit this when we have an array of objects.
       if (je.value_type == JSON_VALUE_OBJECT)
       {
-        current->type= JSON_VALUE_OBJECT;
-        json_temp_object_init(&current->value.object);
+        DBUG_ASSERT(stack[current]->type == JSON_VALUE_ARRAY);
+        //json_temp_object_init(&current->value.object);
+        DBUG_ASSERT(0);
       }
       else
       {
+        DBUG_ASSERT(stack[current]->type == JSON_VALUE_ARRAY);
+        DBUG_ASSERT(je.value_type == JSON_VALUE_ARRAY);
         DBUG_ASSERT(0);
       }
 
@@ -612,6 +679,7 @@ int json_normalize(char *buf, size_t buf_size, const uchar *s, size_t size,
       /* TODO: this looks like a bug in the parser, it never reaches. */
       /* parser found the end of the object (the '}' in JSON) */
       /* pop recursion */
+      --current;
       break;
     case JST_ARRAY_START:
       /* parser found an array (the '[' in JSON) */
@@ -623,11 +691,12 @@ int json_normalize(char *buf, size_t buf_size, const uchar *s, size_t size,
     };
   } while (json_scan_next(&je) == 0);
 
-  json_temp_normalize_sort(root);
+  json_temp_normalize_sort(&root);
 
-  json_temp_to_string(buf, buf_size, root);
+json_normalize_print_and_free:
+  json_temp_to_string(buf, buf_size, &root);
 
-  json_temp_free(root);
+  json_temp_free(&root);
 
   return err;
 
@@ -709,8 +778,22 @@ static void test_json_normalize_values(void)
   check_json_normalize("-6.62607015e-34", "-6.62607015e-34");
 }
 
+static void test_json_normalize_nested_objects(void)
+{
+  const char *in = ""
+  "{\n"
+  "  \"foo\": {\"value\":true},\n"
+  "  \"wiz\": {\n"
+  "\t\t\"alpha\": \"a\",\n\t\t\"bang\": false\n\t}\n"
+  "}";
+
+  const char *expected= "{\"foo\":{\"value\":true},"
+                        "\"wiz\":{\"alpha\":\"a\",\"bang\":false}}";
+  check_json_normalize(in, expected);
+}
+
 #if 0
-static void test_json_normalize_multi_kv(void)
+static void test_json_normalize_nested_arrays(void)
 {
   const char *in = ""
   "{\n"
@@ -722,7 +805,7 @@ static void test_json_normalize_multi_kv(void)
   "  \"bar\": \"value2\"\n"
   "}\n";
 
-  const char *expected= "{\"bar\":\"value2\",\"foo\":\"value\"}";
+  const char *expected= "TODO";
   check_json_normalize(in, expected);
 }
 #endif
@@ -730,16 +813,15 @@ static void test_json_normalize_multi_kv(void)
 int main(void)
 {
 
-  plan(36);
+  plan(40);
   diag("Testing json_normalization.");
 
   test_json_normalize_values();
   test_json_normalize_single_kv();
   test_json_normalize_multi_kv();
   test_json_normalize_array();
-#if 0
-  test_json_normalize_multi_kv();
-#endif
+  test_json_normalize_nested_objects();
+  //test_json_normalize_nested_arrays();
 
   return exit_status();
 }
