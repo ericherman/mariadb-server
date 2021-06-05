@@ -21,6 +21,10 @@
 #include <m_ctype.h> /* TODO: this should be in json_lib.h */
 #include <json_lib.h>
 
+#ifndef DTOA_BUFF_SIZE
+#define DTOA_BUFF_SIZE (460 * sizeof(void *))
+#endif
+
 /*
 From the EXPIRED DRAFT JSON Canonical Form
 https://datatracker.ietf.org/doc/html/draft-staykov-hu-json-canonical-form-00
@@ -274,10 +278,6 @@ json_temp_free(struct json_temp_value *v)
     break;
   }
   case JSON_VALUE_NUMBER:
-  {
-    DBUG_ASSERT(0);
-    break;
-  }
   case JSON_VALUE_NULL:
   case JSON_VALUE_TRUE:
   case JSON_VALUE_FALSE:
@@ -366,7 +366,18 @@ json_temp_to_string(char *buf, size_t size, struct json_temp_value *v)
   }
   case JSON_VALUE_NUMBER:
   {
-    DBUG_ASSERT(0);
+    double d= v->value.number;
+    my_bool err= 0;
+    char dbuf[DTOA_BUFF_SIZE];
+    size_t width= DTOA_BUFF_SIZE-1;
+    size_t len= my_gcvt(d, MY_GCVT_ARG_DOUBLE, width, dbuf, &err);
+    (void)len;
+    if (err) {
+      /* TODO: handle err */
+      DBUG_ASSERT(0);
+    }
+    /* TODO: handle all the buffer overflow cases */
+    strcat(buf, dbuf);
     break;
   }
   case JSON_VALUE_UNINITIALIZED:
@@ -375,6 +386,7 @@ json_temp_to_string(char *buf, size_t size, struct json_temp_value *v)
     break;
   }
   }
+  /* TODO: handle all the buffer overflow cases */
   return buf;
 }
 
@@ -398,8 +410,17 @@ json_temp_store_current_value(struct json_temp_value *current,
     }
     case JSON_VALUE_NUMBER:
     {
-      DBUG_ASSERT(0);
-      return 1;
+      int err= 0;
+      const char *begin= (const char *)je->value_begin;
+      char *end= (char *)je->value_end;
+      double d= my_strtod(begin, &end, &err);
+      DBUG_ASSERT(d == d); /* NaN is not valid JSON */
+      /* https://datatracker.ietf.org/doc/html/rfc8259#section-6 */
+      if (err) {
+        return 1;
+      }
+      current->value.number= d;
+      return 0;
     }
     default: /* No value to be set for other types. */
       return 0;
@@ -678,6 +699,14 @@ static void test_json_normalize_values(void)
   check_json_normalize("\"\"", "\"\"");
   check_json_normalize("{}", "{}");
   check_json_normalize("[]", "[]");
+  check_json_normalize("5", "5");
+  check_json_normalize("5.1", "5.1");
+  check_json_normalize("-5.1", "-5.1");
+  check_json_normalize("12345.67890", "12345.6789");
+  check_json_normalize("2.99792458e8", "299792458");
+  check_json_normalize("6.02214076e23", "6.02214076e23");
+  check_json_normalize("6.62607015e-34", "6.62607015e-34");
+  check_json_normalize("-6.62607015e-34", "-6.62607015e-34");
 }
 
 #if 0
@@ -701,7 +730,7 @@ static void test_json_normalize_multi_kv(void)
 int main(void)
 {
 
-  plan(20);
+  plan(36);
   diag("Testing json_normalization.");
 
   test_json_normalize_values();
