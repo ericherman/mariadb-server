@@ -97,7 +97,7 @@ int json_temp_array_init(struct json_temp_array *array)
 {
   uint init_alloc= 20;
   uint alloc_increment= 20;
-  size_t element_size= sizeof(struct json_temp_string);
+  size_t element_size= sizeof(struct json_temp_value);
   return my_init_dynamic_array(PSI_NOT_INSTRUMENTED, &array->values,
            element_size, init_alloc, alloc_increment,
            MYF(MY_THREAD_SPECIFIC|MY_WME));
@@ -118,6 +118,13 @@ int json_temp_string_init(struct json_temp_string *string,
   return 0;
 }
 
+void json_temp_string_free(struct json_temp_string *string)
+{
+  my_free(string->buf);
+  string->buf= NULL;
+  string->buf_size= 0;
+}
+
 static int
 json_temp_object_append_key_value(struct json_temp_object *obj,
                                   char *key, size_t key_len,
@@ -134,11 +141,19 @@ json_temp_object_append_key_value(struct json_temp_object *obj,
   err|= insert_dynamic(&obj->kv_pairs, &pair);
   if (err)
   {
-    my_free(pair.key.buf);
+    json_temp_string_free(&pair.key);
     return 1;
   }
 
   return 0;
+}
+
+
+static int
+json_temp_array_append_value(struct json_temp_array *arr,
+                             struct json_temp_value *v)
+{
+  return insert_dynamic(&arr->values, v);
 }
 
 
@@ -149,6 +164,27 @@ json_temp_value_type_string_init(struct json_temp_value *ret,
   ret->type= JSON_VALUE_STRING;
   return json_temp_string_init(&ret->value.string, str, len);
 }
+
+
+static void
+json_temp_value_free(struct json_temp_value *value)
+{
+	DBUG_ASSERT(value->type != JSON_VALUE_UNINITIALIZED);
+  switch (value->type) {
+  case JSON_VALUE_STRING:
+    json_temp_string_free(&value->value.string);
+    break;
+  case JSON_VALUE_OBJECT:
+    DBUG_ASSERT(0);
+    break;
+  case JSON_VALUE_ARRAY:
+    DBUG_ASSERT(0);
+    break;
+  default:
+    break;
+  }
+}
+
 
 static int json_temp_kv_comp(const struct json_temp_kv *a,
                              const struct json_temp_kv *b)
@@ -211,8 +247,7 @@ json_temp_free(struct json_temp_value *v)
     for (i= 0; i < pairs_arr->elements; ++i)
     {
       struct json_temp_kv *kv= dynamic_element(pairs_arr, i, struct json_temp_kv *);
-      char *key = kv->key.buf;
-      my_free(key);
+      json_temp_string_free(&kv->key);
       json_temp_free(&kv->value);
     }
     delete_dynamic(pairs_arr);
@@ -235,7 +270,7 @@ json_temp_free(struct json_temp_value *v)
   }
   case JSON_VALUE_STRING:
   {
-    my_free(v->value.string.buf);
+    json_temp_string_free(&v->value.string);
     break;
   }
   case JSON_VALUE_NUMBER:
@@ -343,6 +378,85 @@ json_temp_to_string(char *buf, size_t size, struct json_temp_value *v)
   return buf;
 }
 
+static int
+json_temp_store_current_value(struct json_temp_value *current,
+                              json_engine_t *je)
+{
+  if (json_value_scalar(je))
+  {
+    /* TODO fix in tests. Assume this is for ARRAYS */
+    current->type= je->value_type;
+    switch (current->type)
+    {
+    case JSON_VALUE_STRING:
+    {
+      const char *je_value_begin= (const char *)je->value_begin;
+      size_t je_value_len= (je->value_end - je->value_begin);
+      return json_temp_value_type_string_init(current,
+                                              je_value_begin,
+                                              je_value_len);
+    }
+    case JSON_VALUE_NUMBER:
+    {
+      DBUG_ASSERT(0);
+      return 1;
+    }
+    default: /* No value to be set for other types. */
+      return 0;
+    }
+  }
+  else
+  {
+    if (je->value_type == JSON_VALUE_OBJECT)
+    {
+      current->type= JSON_VALUE_OBJECT;
+      return json_temp_object_init(&current->value.object);
+    }
+    else
+    {
+      DBUG_ASSERT(je->value_type == JSON_VALUE_ARRAY);
+      current->type= JSON_VALUE_ARRAY;
+      return json_temp_array_init(&current->value.array);
+    }
+  }
+}
+
+static int
+json_temp_append_to_array(struct json_temp_value *current,
+                          json_engine_t *je)
+{
+  DBUG_ASSERT(current->type == JSON_VALUE_ARRAY);
+  DBUG_ASSERT(je->value_type != JSON_VALUE_UNINITIALIZED);
+  switch (je->value_type) {
+  case JSON_VALUE_STRING:
+  {
+    size_t je_value_len= (je->value_end - je->value_begin);
+    struct json_temp_value tmp;
+    int err;
+    err= json_temp_value_type_string_init(&tmp,
+                                          (const char *)je->value_begin,
+                                          je_value_len);
+    if (err)
+      return err;
+    err= json_temp_array_append_value(&current->value.array, &tmp);
+    if (err)
+       json_temp_value_free(&tmp);
+		return err;
+  }
+  case JSON_VALUE_NULL:
+  case JSON_VALUE_TRUE:
+  case JSON_VALUE_FALSE:
+  case JSON_VALUE_OBJECT:
+  case JSON_VALUE_ARRAY:
+  case JSON_VALUE_NUMBER:
+    DBUG_ASSERT(0);
+    return 1;
+
+  default:
+    DBUG_ASSERT(0);
+    return 1;
+  }
+}
 
 int json_normalize(char *buf, size_t buf_size, const uchar *s, size_t size,
                    CHARSET_INFO *cs)
@@ -404,7 +518,7 @@ int json_normalize(char *buf, size_t buf_size, const uchar *s, size_t size,
         if (json_temp_object_append_key_value(&current->value.object,
                                               key_buf, key_len, &jt_value))
         {
-          my_free(jt_value.value.string.buf);
+          json_temp_string_free(&jt_value.value.string);
           goto json_normalize_error;
         }
       }
@@ -436,42 +550,17 @@ int json_normalize(char *buf, size_t buf_size, const uchar *s, size_t size,
     case JST_VALUE:
       if (json_read_value(&je))
         goto json_normalize_error;
-      if (current->type == JSON_VALUE_UNINITIALIZED) {
-        if (json_value_scalar(&je))
-        {
-          /* TODO fix in tests. Assume this is for ARRAYS */
-          current->type= je.value_type;
-          if (current->type == JSON_VALUE_STRING)
-          {
-            size_t je_value_len= (je.value_end - je.value_begin);
-            json_temp_value_type_string_init(current,
-                                             (const char *)je.value_begin,
-                                             je_value_len);
-          }
-          if (current->type == JSON_VALUE_NUMBER)
-          {
-            DBUG_ASSERT(0);
-          }
-          break;
-        }
-
-        if (je.value_type == JSON_VALUE_OBJECT)
-        {
-          current->type= JSON_VALUE_OBJECT;
-          json_temp_object_init(&current->value.object);
-        }
-        else
-        {
-          DBUG_ASSERT(je.value_type == JSON_VALUE_ARRAY);
-          current->type= JSON_VALUE_ARRAY;
-          json_temp_array_init(&current->value.array);
-        }
+      // This was initially for 'root' (base object)
+      if (current->type == JSON_VALUE_UNINITIALIZED)
+      {
+        // TODO error handling
+        json_temp_store_current_value(current, &je);
         break;
       }
       if (json_value_scalar(&je))
       {
-        /* TODO fix in tests. */
-        DBUG_ASSERT(0);
+        // TODO error handling
+        json_temp_append_to_array(current, &je);
         break;
       }
 
@@ -520,6 +609,7 @@ json_normalize_error:
   return 1; /* TODO don't leak. */
 }
 
+
 static void
 check_json_normalize(const char *in, const char *expected)
 {
@@ -539,6 +629,7 @@ check_json_normalize(const char *in, const char *expected)
   ok(strcmp(expected, actual) == 0, msg);
 }
 
+
 static void test_json_normalize_single_kv(void)
 {
   const char *in= ""
@@ -550,6 +641,7 @@ static void test_json_normalize_single_kv(void)
   check_json_normalize(in, expected);
 }
 
+
 static void test_json_normalize_multi_kv(void)
 {
   const char *in= ""
@@ -559,6 +651,14 @@ static void test_json_normalize_multi_kv(void)
   "}\n";
 
   const char *expected= "{\"bar\":\"baz\",\"foo\":\"value\"}";
+  check_json_normalize(in, expected);
+}
+
+
+static void test_json_normalize_array(void)
+{
+  const char *in= "[ \"a\", \"b\" ]";
+  const char *expected= "[\"a\",\"b\"]";
   check_json_normalize(in, expected);
 }
 
@@ -595,12 +695,13 @@ static void test_json_normalize_multi_kv(void)
 int main(void)
 {
 
-  plan(18);
+  plan(20);
   diag("Testing json_normalization.");
 
   test_json_normalize_values();
   test_json_normalize_single_kv();
   test_json_normalize_multi_kv();
+  test_json_normalize_array();
 #if 0
   test_json_normalize_multi_kv();
 #endif
