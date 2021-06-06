@@ -415,19 +415,103 @@ json_temp_to_string(char *buf, size_t size, struct json_temp_value *v)
 
 
 static int
-json_temp_get_number_value(struct json_temp_value *current,
-                           json_engine_t *je)
+json_temp_get_number_value(double *number, json_engine_t *je)
 {
   int err= 0;
   const char *begin= (const char *)je->value_begin;
   char *end= (char *)je->value_end;
+
   double d= my_strtod(begin, &end, &err);
-  DBUG_ASSERT(d == d); /* NaN is not valid JSON */
-  /* https://datatracker.ietf.org/doc/html/rfc8259#section-6 */
   if (err)
     return 1;
-  current->value.number= d;
+
+  /* https://datatracker.ietf.org/doc/html/rfc8259#section-6 */
+  DBUG_ASSERT(d == d); /* NaN is not valid JSON */
+
+  *number= d;
   return 0;
+}
+
+
+static void
+json_temp_value_type_number_init(struct json_temp_value *val, double n)
+{
+  val->type= JSON_VALUE_NUMBER;
+  val->value.number= n;
+}
+
+
+static void
+json_temp_value_type_null_init(struct json_temp_value *val)
+{
+  val->type= JSON_VALUE_NULL;
+}
+
+
+static void
+json_temp_value_type_false_init(struct json_temp_value *val)
+{
+  val->type= JSON_VALUE_FALSE;
+}
+
+
+static void
+json_temp_value_type_true_init(struct json_temp_value *val)
+{
+  val->type= JSON_VALUE_TRUE;
+}
+
+
+static int
+json_temp_value_init(struct json_temp_value *val, json_engine_t *je)
+{
+  int err= 0;
+  switch (je->value_type) {
+  case JSON_VALUE_STRING:
+  {
+    size_t je_value_len= (je->value_end - je->value_begin);
+    err= json_temp_value_type_string_init(val,
+                                          (const char *)je->value_begin,
+                                          je_value_len);
+    break;
+  }
+  case JSON_VALUE_NULL:
+  {
+    json_temp_value_type_null_init(val);
+    break;
+  }
+  case JSON_VALUE_TRUE:
+  {
+    json_temp_value_type_true_init(val);
+    break;
+  }
+  case JSON_VALUE_FALSE:
+  {
+    json_temp_value_type_false_init(val);
+    break;
+  }
+  case JSON_VALUE_ARRAY:
+  {
+    err= json_temp_value_type_array_init(val);
+    break;
+  }
+  case JSON_VALUE_OBJECT:
+  {
+    err= json_temp_value_type_object_init(val);
+    break;
+  }
+  case JSON_VALUE_NUMBER:
+  {
+    double number= 0;
+    err= json_temp_get_number_value(&number, je);
+    json_temp_value_type_number_init(val, number);
+    break;
+  }
+  default:
+    DBUG_ASSERT(0);
+    return 1;
+  }
+  return err;
 }
 
 
@@ -441,45 +525,7 @@ json_temp_append_to_array(struct json_temp_value *current,
   DBUG_ASSERT(current->type == JSON_VALUE_ARRAY);
   DBUG_ASSERT(je->value_type != JSON_VALUE_UNINITIALIZED);
 
-  switch (je->value_type) {
-  case JSON_VALUE_STRING:
-  {
-    size_t je_value_len= (je->value_end - je->value_begin);
-    err= json_temp_value_type_string_init(&tmp,
-                                          (const char *)je->value_begin,
-                                          je_value_len);
-    break;
-  }
-  case JSON_VALUE_NULL:
-  case JSON_VALUE_TRUE:
-  case JSON_VALUE_FALSE:
-  {
-    tmp.type= je->value_type;
-    break;
-  }
-  case JSON_VALUE_ARRAY:
-  {
-    err= json_temp_value_type_array_init(&tmp);
-    break;
-  }
-  case JSON_VALUE_OBJECT:
-  {
-    err= json_temp_value_type_object_init(&tmp);
-    break;
-  }
-  case JSON_VALUE_NUMBER:
-  {
-    // TODO:Have a json_temp_value_type_xxxx_init for all types.
-    tmp.type= je->value_type;
-    err= json_temp_get_number_value(&tmp, je);
-    break;
-  }
-  default:
-  {
-    DBUG_ASSERT(0);
-    return 1;
-  }
-  }
+  err= json_temp_value_init(&tmp, je);
 
   if (err)
     return 1;
@@ -504,41 +550,7 @@ json_temp_append_to_object(struct json_temp_value *current,
   DBUG_ASSERT(current->type == JSON_VALUE_OBJECT);
   DBUG_ASSERT(je->value_type != JSON_VALUE_UNINITIALIZED);
 
-  switch (je->value_type) {
-  case JSON_VALUE_STRING:
-  {
-    size_t je_value_len= (je->value_end - je->value_begin);
-    err= json_temp_value_type_string_init(&tmp,
-                                          (const char *)je->value_begin,
-                                          je_value_len);
-    break;
-  }
-  case JSON_VALUE_NULL:
-  case JSON_VALUE_TRUE:
-  case JSON_VALUE_FALSE:
-  {
-    tmp.type= je->value_type;
-    break;
-  }
-  case JSON_VALUE_ARRAY:
-  {
-    err= json_temp_value_type_array_init(&tmp);
-    break;
-  }
-  case JSON_VALUE_OBJECT:
-  {
-    err= json_temp_value_type_object_init(&tmp);
-    break;
-  }
-  case JSON_VALUE_NUMBER:
-    // TODO:Have a json_temp_value_type_xxxx_init for all types.
-    tmp.type= je->value_type;
-    err= json_temp_get_number_value(&tmp, je);
-    break;
-  default:
-    DBUG_ASSERT(0);
-    return 1;
-  }
+  err= json_temp_value_init(&tmp, je);
 
   if (err)
     return 1;
@@ -608,8 +620,10 @@ json_normalize(char *buf, size_t buf_size, const uchar *s, size_t size,
   }
   case JSON_VALUE_NUMBER:
   {
-    if (json_temp_get_number_value(&root, &je))
+    double number= 0;
+    if (json_temp_get_number_value(&number, &je))
       goto json_normalize_error;
+    json_temp_value_type_number_init(&root, number);
     goto json_normalize_print_and_free;
   }
   case JSON_VALUE_TRUE:
