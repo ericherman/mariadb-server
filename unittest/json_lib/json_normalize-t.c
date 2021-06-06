@@ -565,135 +565,159 @@ json_temp_append_to_object(struct json_temp_value *current,
 }
 
 
+static int
+json_temp_parse(struct json_temp_value *root, json_engine_t *je)
+{
+  size_t current;
+  struct json_temp_value *stack[JSON_DEPTH_LIMIT];
+  const size_t key_buf_size= 100;
+  char key_buf[100]; /* TODO */
+  size_t key_len= 0;
+
+  memset(key_buf, 0x00, key_buf_size);
+  memset(stack, 0x00, sizeof(stack));
+  current= 0;
+  stack[current]= root;
+
+  do {
+    switch (je->state)
+    {
+    case JST_KEY:
+      DBUG_ASSERT(stack[current]->type == JSON_VALUE_OBJECT);
+      /* we have the key name */
+      /* json_read_keyname_chr() */
+      key_len= 0;
+      while (json_read_keyname_chr(je) == 0)
+      {
+        key_buf[key_len++]= je->s.c_next;
+      }
+      key_buf[key_len]= '\0';
+
+      /* After reading the key, we have a follow-up value. */
+      if (json_read_value(je))
+        return 1;
+
+      // TODO: idea: Write code such that switch from below works regardless
+      // of depth level.
+      if (json_temp_append_to_object(stack[current], key_buf, key_len, je))
+        return 1;
+      if (!json_value_scalar(je))
+      {
+        struct json_temp_kv *kv;
+        /* TODO: Evaluate if checking for stack overflow is necessary,
+           json_engine should already cover it. */
+        DBUG_ASSERT(je->value_type == JSON_VALUE_ARRAY ||
+                    je->value_type == JSON_VALUE_OBJECT);
+        kv= json_temp_object_get_last_element(&stack[current]->value.object);
+        stack[current + 1]= &kv->value;
+        current+= 1;
+      }
+      break;
+    case JST_VALUE:
+      if (json_read_value(je))
+        return 1;
+      if (json_value_scalar(je))
+      {
+        // TODO error handling
+        json_temp_append_to_array(stack[current], je);
+        break;
+      }
+
+      DBUG_ASSERT(stack[current]->type == JSON_VALUE_ARRAY);
+      DBUG_ASSERT(je->value_type == JSON_VALUE_ARRAY ||
+                  je->value_type == JSON_VALUE_OBJECT);
+
+      json_temp_append_to_array(stack[current], je);
+      {
+        // TODO: Change compiler to use C11.
+        struct json_temp_array *current_arr= &stack[current]->value.array;
+        stack[current + 1]= json_temp_array_get_last_element(current_arr);
+      }
+      ++current;
+
+
+      /* see the json_read_value() */
+      break;
+    case JST_OBJ_START:
+       /* parser found an object (the '{' in JSON) */
+      /* time to recurse! */
+      break;
+    case JST_OBJ_END:
+      /* TODO: this looks like a bug in the parser, it never reaches. */
+      /* parser found the end of the object (the '}' in JSON) */
+      /* pop recursion */
+      --current;
+      break;
+    case JST_ARRAY_START:
+      /* parser found an array (the '[' in JSON) */
+      break;
+    case JST_ARRAY_END:
+      /* TODO: this needs to pop off the stack, as does JST_OBJ_END. */
+      /* parser found the end of the array (the ']' in JSON) */
+      --current;
+      break;
+    };
+  } while (json_scan_next(je) == 0);
+  return 0;
+}
+
+
+static int
+json_temp_build(struct json_temp_value *root,
+    const uchar *s, size_t size, CHARSET_INFO *cs)
+{
+  int err= 0;
+  json_engine_t je;
+
+  DBUG_ASSERT(s);
+  memset(&je, 0x00, sizeof(je));
+
+  memset(root, 0x00, sizeof(struct json_temp_value));
+  root->type= JSON_VALUE_UNINITIALIZED;
+
+  err= json_scan_start(&je, cs, s, s + size);
+  if (json_read_value(&je))
+    return err;
+
+  err= json_temp_value_init(root, &je);
+
+  if (root->type == JSON_VALUE_OBJECT ||
+      root->type == JSON_VALUE_ARRAY)
+  {
+    err= json_temp_parse(root, &je);
+    if (err)
+      return err;
+  }
+  return err;
+}
+
+
 int
 json_normalize(char *buf, size_t buf_size, const uchar *s, size_t size,
                CHARSET_INFO *cs)
 {
-  json_engine_t je;
   int err= 0;
-  const size_t key_buf_size= 100;
-  char key_buf[100]; /* TODO */
-  size_t key_len= 0;
-  size_t current;
-  struct json_temp_value *stack[JSON_DEPTH_LIMIT];
   struct json_temp_value root;
-
+  char *rv;
 
   DBUG_ASSERT(buf);
   DBUG_ASSERT(buf_size);
-  DBUG_ASSERT(s);
 
   buf[0]= '\0';
-  memset(key_buf, 0x00, key_buf_size);
-  memset(&je, 0x00, sizeof(je));
-  memset(stack, 0x00, sizeof(stack));
-  memset(&root, 0x00, sizeof(root));
 
-  root.type= JSON_VALUE_UNINITIALIZED;
-  current= 0;
-  stack[current]= &root;
-
-  err= json_scan_start(&je, cs, s, s + size);
-  if (json_read_value(&je))
-    goto json_normalize_error;
-
-  err= json_temp_value_init(&root, &je);
-
-  if (root.type == JSON_VALUE_OBJECT ||
-      root.type == JSON_VALUE_ARRAY)
-  {
-    do {
-      switch (je.state)
-      {
-      case JST_KEY:
-        DBUG_ASSERT(stack[current]->type == JSON_VALUE_OBJECT);
-        /* we have the key name */
-        /* json_read_keyname_chr() */
-        key_len= 0;
-        while (json_read_keyname_chr(&je) == 0)
-        {
-          key_buf[key_len++]= je.s.c_next;
-        }
-        key_buf[key_len]= '\0';
-
-        /* After reading the key, we have a follow-up value. */
-        if (json_read_value(&je))
-          goto json_normalize_error;
-
-        // TODO: idea: Write code such that switch from below works regardless
-        // of depth level.
-        if (json_temp_append_to_object(stack[current], key_buf, key_len, &je))
-          goto json_normalize_error;
-        if (!json_value_scalar(&je))
-        {
-          struct json_temp_kv *kv;
-          /* TODO: Evaluate if checking for stack overflow is necessary,
-             json_engine should already cover it. */
-          DBUG_ASSERT(je.value_type == JSON_VALUE_ARRAY ||
-                      je.value_type == JSON_VALUE_OBJECT);
-          kv= json_temp_object_get_last_element(&stack[current]->value.object);
-          stack[current + 1]= &kv->value;
-          current+= 1;
-        }
-        break;
-      case JST_VALUE:
-        if (json_read_value(&je))
-          goto json_normalize_error;
-        if (json_value_scalar(&je))
-        {
-          // TODO error handling
-          json_temp_append_to_array(stack[current], &je);
-          break;
-        }
-
-        DBUG_ASSERT(stack[current]->type == JSON_VALUE_ARRAY);
-        DBUG_ASSERT(je.value_type == JSON_VALUE_ARRAY ||
-                    je.value_type == JSON_VALUE_OBJECT);
-
-        json_temp_append_to_array(stack[current], &je);
-        {
-          // TODO: Change compiler to use C11.
-          struct json_temp_array *current_arr= &stack[current]->value.array;
-          stack[current + 1]= json_temp_array_get_last_element(current_arr);
-        }
-        ++current;
-
-
-        /* see the json_read_value() */
-        break;
-      case JST_OBJ_START:
-         /* parser found an object (the '{' in JSON) */
-        /* time to recurse! */
-        break;
-      case JST_OBJ_END:
-        /* TODO: this looks like a bug in the parser, it never reaches. */
-        /* parser found the end of the object (the '}' in JSON) */
-        /* pop recursion */
-        --current;
-        break;
-      case JST_ARRAY_START:
-        /* parser found an array (the '[' in JSON) */
-        break;
-      case JST_ARRAY_END:
-        /* TODO: this needs to pop off the stack, as does JST_OBJ_END. */
-        /* parser found the end of the array (the ']' in JSON) */
-        --current;
-        break;
-      };
-    } while (json_scan_next(&je) == 0);
-  }
+  err= json_temp_build(&root, s, size, cs);
+  if (err)
+    goto json_normalize_end;
 
   json_temp_normalize_sort(&root);
 
-  json_temp_to_string(buf, buf_size, &root);
+  rv= json_temp_to_string(buf, buf_size, &root);
+  err= rv ? 0 : 1;
 
+json_normalize_end:
   json_temp_value_free(&root);
 
   return err;
-
-json_normalize_error:
-  DBUG_ASSERT(0);
-  return 1; /* TODO don't leak. */
 }
 
 
