@@ -94,11 +94,13 @@ json_temp_malloc(size_t size)
 
 
 int
-json_temp_object_init(struct json_temp_object *obj)
+json_temp_value_type_object_init(struct json_temp_value *val)
 {
-  uint init_alloc= 20;
-  uint alloc_increment= 20;
-  size_t element_size= sizeof(struct json_temp_kv);
+  const uint init_alloc= 20;
+  const uint alloc_increment= 20;
+  const size_t element_size= sizeof(struct json_temp_kv);
+  struct json_temp_object *obj= &val->value.object;
+  val->type= JSON_VALUE_OBJECT;
   return my_init_dynamic_array(PSI_NOT_INSTRUMENTED, &obj->kv_pairs,
          element_size, init_alloc, alloc_increment,
          MYF(MY_THREAD_SPECIFIC|MY_WME));
@@ -433,7 +435,7 @@ static int
 json_temp_append_to_array(struct json_temp_value *current,
                           json_engine_t *je)
 {
-  int err;
+  int err= 0;
   struct json_temp_value tmp;
 
   DBUG_ASSERT(current->type == JSON_VALUE_ARRAY);
@@ -446,59 +448,48 @@ json_temp_append_to_array(struct json_temp_value *current,
     err= json_temp_value_type_string_init(&tmp,
                                           (const char *)je->value_begin,
                                           je_value_len);
-    if (err)
-      return err;
-    err= json_temp_array_append_value(&current->value.array, &tmp);
-    if (err)
-       json_temp_value_free(&tmp);
-    return err;
+    break;
   }
   case JSON_VALUE_NULL:
   case JSON_VALUE_TRUE:
   case JSON_VALUE_FALSE:
   {
     tmp.type= je->value_type;
-    return json_temp_array_append_value(&current->value.array, &tmp);
+    break;
   }
-
   case JSON_VALUE_ARRAY:
   {
-    // TODO:Have a json_temp_value_type_xxxx_init for all types.
     err= json_temp_value_type_array_init(&tmp);
-    if (err)
-      return err;
-    err= json_temp_array_append_value(&current->value.array, &tmp);
-    if (err)
-      json_temp_value_free(&tmp);
-    return err;
+    break;
   }
   case JSON_VALUE_OBJECT:
   {
-    tmp.type= je->value_type;
-    err= json_temp_object_init(&tmp.value.object);
-    if (err)
-      return err;
-    err= json_temp_array_append_value(&current->value.array, &tmp);
-    // TODO: remove some of this duplication
-    if (err)
-      json_temp_value_free(&tmp);
-    return err;
+    err= json_temp_value_type_object_init(&tmp);
+    break;
   }
   case JSON_VALUE_NUMBER:
+  {
+    // TODO:Have a json_temp_value_type_xxxx_init for all types.
     tmp.type= je->value_type;
     err= json_temp_get_number_value(&tmp, je);
-    if (err)
-      return err;
-    err= json_temp_array_append_value(&current->value.array, &tmp);
-    // TODO: remove some of this duplication
-    if (err)
-      json_temp_value_free(&tmp);
-    return err;
-
+    break;
+  }
   default:
+  {
     DBUG_ASSERT(0);
     return 1;
   }
+  }
+
+  if (err)
+    return 1;
+
+  err= json_temp_array_append_value(&current->value.array, &tmp);
+
+  if (err)
+    json_temp_value_free(&tmp);
+
+  return err;
 }
 
 
@@ -536,12 +527,11 @@ json_temp_append_to_object(struct json_temp_value *current,
   }
   case JSON_VALUE_OBJECT:
   {
-    // TODO:Have a json_temp_value_type_xxxx_init for all types.
-    tmp.type= je->value_type;
-    err= json_temp_object_init(&tmp.value.object);
+    err= json_temp_value_type_object_init(&tmp);
     break;
   }
   case JSON_VALUE_NUMBER:
+    // TODO:Have a json_temp_value_type_xxxx_init for all types.
     tmp.type= je->value_type;
     err= json_temp_get_number_value(&tmp, je);
     break;
@@ -552,8 +542,10 @@ json_temp_append_to_object(struct json_temp_value *current,
 
   if (err)
     return 1;
+
   err= json_temp_object_append_key_value(&current->value.object, key_buf,
                                          key_len, &tmp);
+
   if (err)
     json_temp_value_free(&tmp);
 
@@ -597,7 +589,7 @@ json_normalize(char *buf, size_t buf_size, const uchar *s, size_t size,
   root.type = je.value_type;
   switch (root.type) {
   case JSON_VALUE_OBJECT:
-    err= json_temp_object_init(&root.value.object);
+    err= json_temp_value_type_object_init(&root);
     if (err)
       goto json_normalize_error; // TODO cleanup
     break;
