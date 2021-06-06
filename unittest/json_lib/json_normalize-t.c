@@ -50,20 +50,24 @@ https://datatracker.ietf.org/doc/html/draft-staykov-hu-json-canonical-form-00
      codepoint values.
 */
 
+
 struct json_temp_string { /* this covers both keys and values as strings */
   size_t buf_size;
   char *buf;
 };
+
 
 struct json_temp_array {
   /* struct json_temp_value *values; */
   DYNAMIC_ARRAY values;
 };
 
+
 struct json_temp_object {
   /* PAIR(struct json_temp_string, struct json_temp_value) */
   DYNAMIC_ARRAY kv_pairs;
 };
+
 
 struct json_temp_value {
   enum json_value_types type;
@@ -75,19 +79,22 @@ struct json_temp_value {
   } value;
 };
 
+
 struct json_temp_kv {
   struct json_temp_string key;
   struct json_temp_value  value;
 };
 
 
-
-static void *json_temp_malloc(size_t size)
+static void *
+json_temp_malloc(size_t size)
 {
   return my_malloc(PSI_NOT_INSTRUMENTED, size, MYF(MY_THREAD_SPECIFIC|MY_WME));
 }
 
-int json_temp_object_init(struct json_temp_object *obj)
+
+int
+json_temp_object_init(struct json_temp_object *obj)
 {
   uint init_alloc= 20;
   uint alloc_increment= 20;
@@ -97,7 +104,9 @@ int json_temp_object_init(struct json_temp_object *obj)
          MYF(MY_THREAD_SPECIFIC|MY_WME));
 }
 
-int json_temp_array_init(struct json_temp_array *array)
+
+int
+json_temp_array_init(struct json_temp_array *array)
 {
   uint init_alloc= 20;
   uint alloc_increment= 20;
@@ -107,8 +116,10 @@ int json_temp_array_init(struct json_temp_array *array)
            MYF(MY_THREAD_SPECIFIC|MY_WME));
 }
 
-int json_temp_string_init(struct json_temp_string *string,
-                          const char *str, size_t len)
+
+int
+json_temp_string_init(struct json_temp_string *string,
+                      const char *str, size_t len)
 {
   string->buf_size= len + 1;
   string->buf= json_temp_malloc(string->buf_size);
@@ -122,12 +133,15 @@ int json_temp_string_init(struct json_temp_string *string,
   return 0;
 }
 
-void json_temp_string_free(struct json_temp_string *string)
+
+void
+json_temp_string_free(struct json_temp_string *string)
 {
   my_free(string->buf);
   string->buf= NULL;
   string->buf_size= 0;
 }
+
 
 static int
 json_temp_object_append_key_value(struct json_temp_object *obj,
@@ -151,6 +165,7 @@ json_temp_object_append_key_value(struct json_temp_object *obj,
 
   return 0;
 }
+
 
 static struct json_temp_kv*
 json_temp_object_get_last_element(struct json_temp_object *obj)
@@ -195,11 +210,13 @@ json_temp_value_type_string_init(struct json_temp_value *ret,
 }
 
 
-static int json_temp_kv_comp(const struct json_temp_kv *a,
-                             const struct json_temp_kv *b)
+static int
+json_temp_kv_comp(const struct json_temp_kv *a,
+                  const struct json_temp_kv *b)
 {
   return strcmp(a->key.buf, b->key.buf);
 }
+
 
 static void
 json_temp_normalize_sort(struct json_temp_value *v)
@@ -396,6 +413,7 @@ json_temp_to_string(char *buf, size_t size, struct json_temp_value *v)
   /* TODO: handle all the buffer overflow cases */
   return buf;
 }
+
 
 static int
 json_temp_get_number_value(struct json_temp_value *current,
@@ -759,7 +777,8 @@ check_json_normalize(const char *in, const char *expected)
 }
 
 
-static void test_json_normalize_single_kv(void)
+static void
+test_json_normalize_single_kv(void)
 {
   const char *in= ""
   "{\n"
@@ -771,7 +790,8 @@ static void test_json_normalize_single_kv(void)
 }
 
 
-static void test_json_normalize_multi_kv(void)
+static void
+test_json_normalize_multi_kv(void)
 {
   const char *in= ""
   "{\n"
@@ -784,7 +804,8 @@ static void test_json_normalize_multi_kv(void)
 }
 
 
-static void test_json_normalize_array(void)
+static void
+test_json_normalize_array(void)
 {
   const char *in= "[ \"a\", \"b\", true, false, null ]";
   const char *expected= "[\"a\",\"b\",true,false,null]";
@@ -792,7 +813,8 @@ static void test_json_normalize_array(void)
 }
 
 
-static void test_json_normalize_values(void)
+static void
+test_json_normalize_values(void)
 {
   check_json_normalize("\"foo\"", "\"foo\"");
   check_json_normalize("true", "true");
@@ -811,7 +833,9 @@ static void test_json_normalize_values(void)
   check_json_normalize("-6.62607015e-34", "-6.62607015e-34");
 }
 
-static void test_json_normalize_nested_objects(void)
+
+static void
+test_json_normalize_nested_objects(void)
 {
   const char *in = ""
   "{\n"
@@ -825,7 +849,9 @@ static void test_json_normalize_nested_objects(void)
   check_json_normalize(in, expected);
 }
 
-static void test_json_normalize_nested_arrays(void)
+
+static void
+test_json_normalize_nested_arrays(void)
 {
   const char *in = ""
   "[\n"
@@ -837,7 +863,9 @@ static void test_json_normalize_nested_arrays(void)
   check_json_normalize(in, expected);
 }
 
-static void test_json_normalize_nested_deep(void)
+
+static void
+test_json_normalize_nested_deep(void)
 {
   const char *in = ""
   "{\n"
@@ -865,7 +893,9 @@ static void test_json_normalize_nested_deep(void)
   check_json_normalize(in, expected);
 }
 
-int main(void)
+
+int
+main(void)
 {
 
   plan(42);
