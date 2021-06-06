@@ -195,26 +195,6 @@ json_temp_value_type_string_init(struct json_temp_value *ret,
 }
 
 
-static void
-json_temp_value_free(struct json_temp_value *value)
-{
-  DBUG_ASSERT(value->type != JSON_VALUE_UNINITIALIZED);
-  switch (value->type) {
-  case JSON_VALUE_STRING:
-    json_temp_string_free(&value->value.string);
-    break;
-  case JSON_VALUE_OBJECT:
-    DBUG_ASSERT(0);
-    break;
-  case JSON_VALUE_ARRAY:
-    DBUG_ASSERT(0);
-    break;
-  default:
-    break;
-  }
-}
-
-
 static int json_temp_kv_comp(const struct json_temp_kv *a,
                              const struct json_temp_kv *b)
 {
@@ -264,7 +244,7 @@ json_temp_normalize_sort(struct json_temp_value *v)
 
 
 static void
-json_temp_free(struct json_temp_value *v)
+json_temp_value_free(struct json_temp_value *v)
 {
   switch (v->type) {
   case JSON_VALUE_OBJECT:
@@ -278,7 +258,7 @@ json_temp_free(struct json_temp_value *v)
       struct json_temp_kv *kv;
       kv= dynamic_element(pairs_arr, i, struct json_temp_kv *);
       json_temp_string_free(&kv->key);
-      json_temp_free(&kv->value);
+      json_temp_value_free(&kv->value);
     }
     delete_dynamic(pairs_arr);
     break;
@@ -293,7 +273,7 @@ json_temp_free(struct json_temp_value *v)
     {
       struct json_temp_value *jt_value;
       jt_value=  dynamic_element(values_arr, i, struct json_temp_value *);
-      json_temp_free(jt_value);
+      json_temp_value_free(jt_value);
     }
     delete_dynamic(values_arr);
 
@@ -749,7 +729,7 @@ json_normalize(char *buf, size_t buf_size, const uchar *s, size_t size,
 json_normalize_print_and_free:
   json_temp_to_string(buf, buf_size, &root);
 
-  json_temp_free(&root);
+  json_temp_value_free(&root);
 
   return err;
 
