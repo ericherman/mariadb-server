@@ -25,6 +25,10 @@
 #define DTOA_BUFF_SIZE (460 * sizeof(void *))
 #endif
 
+#ifndef PSI_JSON
+#define PSI_JSON PSI_NOT_INSTRUMENTED
+#endif
+
 /*
 From the EXPIRED DRAFT JSON Canonical Form
 https://datatracker.ietf.org/doc/html/draft-staykov-hu-json-canonical-form-00
@@ -51,109 +55,100 @@ https://datatracker.ietf.org/doc/html/draft-staykov-hu-json-canonical-form-00
 */
 
 
-struct json_temp_string { /* this covers both keys and values as strings */
-  size_t buf_size;
-  char *buf;
-};
-
-
-struct json_temp_array {
-  /* struct json_temp_value *values; */
+struct json_norm_array {
   DYNAMIC_ARRAY values;
 };
 
 
-struct json_temp_object {
-  /* PAIR(struct json_temp_string, struct json_temp_value) */
+struct json_norm_object {
   DYNAMIC_ARRAY kv_pairs;
 };
 
 
-struct json_temp_value {
+struct json_norm_value {
   enum json_value_types type;
   union {
     double number;
-    struct json_temp_string string;
-    struct json_temp_array array;
-    struct json_temp_object object;
+    LEX_STRING string;
+    struct json_norm_array array;
+    struct json_norm_object object;
   } value;
 };
 
 
-struct json_temp_kv {
-  struct json_temp_string key;
-  struct json_temp_value  value;
+struct json_norm_kv {
+  LEX_STRING key;
+  struct json_norm_value  value;
 };
 
 
 static void *
-json_temp_malloc(size_t size)
+json_norm_malloc(size_t size)
 {
-  return my_malloc(PSI_NOT_INSTRUMENTED, size, MYF(MY_THREAD_SPECIFIC|MY_WME));
+  return my_malloc(PSI_JSON, size, MYF(MY_THREAD_SPECIFIC|MY_WME));
 }
 
 
 int
-json_temp_value_type_object_init(struct json_temp_value *val)
+json_norm_value_type_object_init(struct json_norm_value *val)
 {
   const uint init_alloc= 20;
   const uint alloc_increment= 20;
-  const size_t element_size= sizeof(struct json_temp_kv);
-  struct json_temp_object *obj= &val->value.object;
+  const size_t element_size= sizeof(struct json_norm_kv);
+  struct json_norm_object *obj= &val->value.object;
   val->type= JSON_VALUE_OBJECT;
-  return my_init_dynamic_array(PSI_NOT_INSTRUMENTED, &obj->kv_pairs,
+  return my_init_dynamic_array(PSI_JSON, &obj->kv_pairs,
          element_size, init_alloc, alloc_increment,
          MYF(MY_THREAD_SPECIFIC|MY_WME));
 }
 
 
 int
-json_temp_value_type_array_init(struct json_temp_value *val)
+json_norm_value_type_array_init(struct json_norm_value *val)
 {
   const uint init_alloc= 20;
   const uint alloc_increment= 20;
-  const size_t element_size= sizeof(struct json_temp_value);
-  struct json_temp_array *array= &val->value.array;
+  const size_t element_size= sizeof(struct json_norm_value);
+  struct json_norm_array *array= &val->value.array;
   val->type= JSON_VALUE_ARRAY;
-  return my_init_dynamic_array(PSI_NOT_INSTRUMENTED, &array->values,
+  return my_init_dynamic_array(PSI_JSON, &array->values,
            element_size, init_alloc, alloc_increment,
            MYF(MY_THREAD_SPECIFIC|MY_WME));
 }
 
 
 int
-json_temp_string_init(struct json_temp_string *string,
-                      const char *str, size_t len)
+json_norm_string_init(LEX_STRING *string, const char *str, size_t len)
 {
-  string->buf_size= len + 1;
-  string->buf= json_temp_malloc(string->buf_size);
-  if (!string->buf)
+  string->length= len + 1;
+  string->str= json_norm_malloc(string->length);
+  if (!string->str)
   {
-    string->buf_size= 0;
+    string->length= 0;
     return 1;
   }
-  strncpy((char *)string->buf, str, len);
-  string->buf[len]= 0;
+  strncpy((char *)string->str, str, len);
+  string->str[len]= 0;
   return 0;
 }
 
 
 void
-json_temp_string_free(struct json_temp_string *string)
+json_norm_string_free(LEX_STRING *string)
 {
-  my_free(string->buf);
-  string->buf= NULL;
-  string->buf_size= 0;
+  my_free(string->str);
+  string->str= NULL;
+  string->length= 0;
 }
 
 
 static int
-json_temp_object_append_key_value(struct json_temp_object *obj,
+json_norm_object_append_key_value(struct json_norm_object *obj,
                                   DYNAMIC_STRING *key,
-                                  struct json_temp_value *v)
+                                  struct json_norm_value *v)
 {
-  struct json_temp_kv pair;
-  int err= json_temp_string_init(&pair.key, key->str, key->length);
+  struct json_norm_kv pair;
+  int err= json_norm_string_init(&pair.key, key->str, key->length);
 
   if (err)
     return 1;
@@ -163,7 +158,7 @@ json_temp_object_append_key_value(struct json_temp_object *obj,
   err|= insert_dynamic(&obj->kv_pairs, &pair);
   if (err)
   {
-    json_temp_string_free(&pair.key);
+    json_norm_string_free(&pair.key);
     return 1;
   }
 
@@ -171,59 +166,59 @@ json_temp_object_append_key_value(struct json_temp_object *obj,
 }
 
 
-static struct json_temp_kv*
-json_temp_object_get_last_element(struct json_temp_object *obj)
+static struct json_norm_kv*
+json_norm_object_get_last_element(struct json_norm_object *obj)
 {
-  struct json_temp_kv *kv;
+  struct json_norm_kv *kv;
 
   DBUG_ASSERT(obj->kv_pairs.elements > 0);
   kv= dynamic_element(&obj->kv_pairs,
                       obj->kv_pairs.elements - 1,
-                      struct json_temp_kv*);
+                      struct json_norm_kv*);
   return kv;
 }
 
 
-static struct json_temp_value*
-json_temp_array_get_last_element(struct json_temp_array *arr)
+static struct json_norm_value*
+json_norm_array_get_last_element(struct json_norm_array *arr)
 {
-  struct json_temp_value *value;
+  struct json_norm_value *value;
 
   DBUG_ASSERT(arr->values.elements > 0);
   value= dynamic_element(&arr->values,
                          arr->values.elements - 1,
-                         struct json_temp_value*);
+                         struct json_norm_value*);
   return value;
 }
 
 
 static int
-json_temp_array_append_value(struct json_temp_array *arr,
-                             struct json_temp_value *v)
+json_norm_array_append_value(struct json_norm_array *arr,
+                             struct json_norm_value *v)
 {
   return insert_dynamic(&arr->values, v);
 }
 
 
 static int
-json_temp_value_type_string_init(struct json_temp_value *ret,
+json_norm_value_type_string_init(struct json_norm_value *ret,
                                  const char *str, size_t len)
 {
   ret->type= JSON_VALUE_STRING;
-  return json_temp_string_init(&ret->value.string, str, len);
+  return json_norm_string_init(&ret->value.string, str, len);
 }
 
 
 static int
-json_temp_kv_comp(const struct json_temp_kv *a,
-                  const struct json_temp_kv *b)
+json_norm_kv_comp(const struct json_norm_kv *a,
+                  const struct json_norm_kv *b)
 {
-  return strcmp(a->key.buf, b->key.buf);
+  return strcmp(a->key.str, b->key.str);
 }
 
 
 static void
-json_temp_normalize_sort(struct json_temp_value *v)
+json_normalize_sort(struct json_norm_value *v)
 {
   switch (v->type) {
   case JSON_VALUE_OBJECT:
@@ -232,13 +227,13 @@ json_temp_normalize_sort(struct json_temp_value *v)
     DYNAMIC_ARRAY *pairs= &v->value.object.kv_pairs;
     for (i= 0; i < pairs->elements; ++i)
     {
-      struct json_temp_kv *kv= dynamic_element(pairs, i, struct json_temp_kv*);
-      json_temp_normalize_sort(&kv->value);
+      struct json_norm_kv *kv= dynamic_element(pairs, i, struct json_norm_kv*);
+      json_normalize_sort(&kv->value);
     }
 
-    my_qsort((uchar*) dynamic_element(pairs, 0, struct json_temp_kv*),
-        pairs->elements, sizeof(struct json_temp_kv),
-        (qsort_cmp) json_temp_kv_comp);
+    my_qsort((uchar*) dynamic_element(pairs, 0, struct json_norm_kv*),
+        pairs->elements, sizeof(struct json_norm_kv),
+        (qsort_cmp) json_norm_kv_comp);
     break;
   }
   case JSON_VALUE_ARRAY:
@@ -248,9 +243,9 @@ json_temp_normalize_sort(struct json_temp_value *v)
     DYNAMIC_ARRAY *values= &v->value.array.values;
     for (i= 0; i < values->elements; ++i)
     {
-      struct json_temp_value *value;
-      value= dynamic_element(values, i, struct json_temp_value*);
-      json_temp_normalize_sort(value);
+      struct json_norm_value *value;
+      value= dynamic_element(values, i, struct json_norm_value*);
+      json_normalize_sort(value);
     }
 
     break;
@@ -265,42 +260,42 @@ json_temp_normalize_sort(struct json_temp_value *v)
 
 
 static void
-json_temp_value_free(struct json_temp_value *v)
+json_norm_value_free(struct json_norm_value *v)
 {
   size_t i;
   switch (v->type) {
   case JSON_VALUE_OBJECT:
   {
-    struct json_temp_object *obj= &v->value.object;
+    struct json_norm_object *obj= &v->value.object;
 
     DYNAMIC_ARRAY *pairs_arr= &obj->kv_pairs;
     for (i= 0; i < pairs_arr->elements; ++i)
     {
-      struct json_temp_kv *kv;
-      kv= dynamic_element(pairs_arr, i, struct json_temp_kv *);
-      json_temp_string_free(&kv->key);
-      json_temp_value_free(&kv->value);
+      struct json_norm_kv *kv;
+      kv= dynamic_element(pairs_arr, i, struct json_norm_kv *);
+      json_norm_string_free(&kv->key);
+      json_norm_value_free(&kv->value);
     }
     delete_dynamic(pairs_arr);
     break;
   }
   case JSON_VALUE_ARRAY:
   {
-    struct json_temp_array *arr= &v->value.array;
+    struct json_norm_array *arr= &v->value.array;
 
     DYNAMIC_ARRAY *values_arr= &arr->values;
     for (i= 0; i < arr->values.elements; ++i)
     {
-      struct json_temp_value *jt_value;
-      jt_value= dynamic_element(values_arr, i, struct json_temp_value *);
-      json_temp_value_free(jt_value);
+      struct json_norm_value *jt_value;
+      jt_value= dynamic_element(values_arr, i, struct json_norm_value *);
+      json_norm_value_free(jt_value);
     }
     delete_dynamic(values_arr);
     break;
   }
   case JSON_VALUE_STRING:
   {
-    json_temp_string_free(&v->value.string);
+    json_norm_string_free(&v->value.string);
     break;
   }
   case JSON_VALUE_NUMBER:
@@ -315,14 +310,14 @@ json_temp_value_free(struct json_temp_value *v)
 
 
 static int
-json_temp_to_dynamic_string(DYNAMIC_STRING *buf, struct json_temp_value *v)
+json_norm_to_dynamic_string(DYNAMIC_STRING *buf, struct json_norm_value *v)
 {
   switch (v->type)
   {
   case JSON_VALUE_OBJECT:
   {
     size_t i;
-    struct json_temp_object *obj= &v->value.object;
+    struct json_norm_object *obj= &v->value.object;
     DYNAMIC_ARRAY *pairs_arr= &obj->kv_pairs;
 
     if (dynstr_append_mem(buf, STRING_WITH_LEN("{")))
@@ -330,13 +325,13 @@ json_temp_to_dynamic_string(DYNAMIC_STRING *buf, struct json_temp_value *v)
 
     for (i= 0; i < pairs_arr->elements; ++i)
     {
-      struct json_temp_kv *kv;
-      kv= dynamic_element(pairs_arr, i, struct json_temp_kv *);
+      struct json_norm_kv *kv;
+      kv= dynamic_element(pairs_arr, i, struct json_norm_kv *);
 
       if (dynstr_append_mem(buf, STRING_WITH_LEN("\"")) ||
-          dynstr_append(buf, kv->key.buf) ||
+          dynstr_append(buf, kv->key.str) ||
           dynstr_append_mem(buf, STRING_WITH_LEN("\":")) ||
-          json_temp_to_dynamic_string(buf, &kv->value))
+          json_norm_to_dynamic_string(buf, &kv->value))
         return 1;
 
       if (i != (pairs_arr->elements - 1))
@@ -350,17 +345,17 @@ json_temp_to_dynamic_string(DYNAMIC_STRING *buf, struct json_temp_value *v)
   case JSON_VALUE_ARRAY:
   {
     size_t i;
-    struct json_temp_array *arr= &v->value.array;
+    struct json_norm_array *arr= &v->value.array;
     DYNAMIC_ARRAY *values_arr= &arr->values;
 
     if (dynstr_append_mem(buf, STRING_WITH_LEN("[")))
       return 1;
     for (i= 0; i < values_arr->elements; ++i)
     {
-      struct json_temp_value *jt_value;
-      jt_value= dynamic_element(values_arr, i, struct json_temp_value *);
+      struct json_norm_value *jt_value;
+      jt_value= dynamic_element(values_arr, i, struct json_norm_value *);
 
-      if (json_temp_to_dynamic_string(buf, jt_value))
+      if (json_norm_to_dynamic_string(buf, jt_value))
         return 1;
       if (i != (values_arr->elements - 1))
         if (dynstr_append_mem(buf, STRING_WITH_LEN(",")))
@@ -372,7 +367,7 @@ json_temp_to_dynamic_string(DYNAMIC_STRING *buf, struct json_temp_value *v)
   }
   case JSON_VALUE_STRING:
   {
-    if (dynstr_append(buf, v->value.string.buf))
+    if (dynstr_append(buf, v->value.string.str))
       return 1;
     break;
   }
@@ -418,7 +413,7 @@ json_temp_to_dynamic_string(DYNAMIC_STRING *buf, struct json_temp_value *v)
 
 
 static char *
-json_temp_to_string(char *out, size_t size, struct json_temp_value *v)
+json_norm_to_string(char *out, size_t size, struct json_norm_value *v)
 {
   DYNAMIC_STRING buf;
   int err;
@@ -430,7 +425,7 @@ json_temp_to_string(char *out, size_t size, struct json_temp_value *v)
   if (init_dynamic_string(&buf, NULL, 0, 0))
     return NULL;
 
-  err= json_temp_to_dynamic_string(&buf, v);
+  err= json_norm_to_dynamic_string(&buf, v);
 
   if (!err)
     strncpy(out, buf.str, size);
@@ -442,7 +437,7 @@ json_temp_to_string(char *out, size_t size, struct json_temp_value *v)
 
 
 static int
-json_temp_get_number_value(double *number, json_engine_t *je)
+json_norm_get_number_value(double *number, json_engine_t *je)
 {
   int err= 0;
   const char *begin= (const char *)je->value_begin;
@@ -461,7 +456,7 @@ json_temp_get_number_value(double *number, json_engine_t *je)
 
 
 static void
-json_temp_value_type_number_init(struct json_temp_value *val, double n)
+json_norm_value_type_number_init(struct json_norm_value *val, double n)
 {
   val->type= JSON_VALUE_NUMBER;
   val->value.number= n;
@@ -469,69 +464,69 @@ json_temp_value_type_number_init(struct json_temp_value *val, double n)
 
 
 static void
-json_temp_value_type_null_init(struct json_temp_value *val)
+json_norm_value_type_null_init(struct json_norm_value *val)
 {
   val->type= JSON_VALUE_NULL;
 }
 
 
 static void
-json_temp_value_type_false_init(struct json_temp_value *val)
+json_norm_value_type_false_init(struct json_norm_value *val)
 {
   val->type= JSON_VALUE_FALSE;
 }
 
 
 static void
-json_temp_value_type_true_init(struct json_temp_value *val)
+json_norm_value_type_true_init(struct json_norm_value *val)
 {
   val->type= JSON_VALUE_TRUE;
 }
 
 
 static int
-json_temp_value_init(struct json_temp_value *val, json_engine_t *je)
+json_norm_value_init(struct json_norm_value *val, json_engine_t *je)
 {
   int err= 0;
   switch (je->value_type) {
   case JSON_VALUE_STRING:
   {
     size_t je_value_len= (je->value_end - je->value_begin);
-    err= json_temp_value_type_string_init(val,
+    err= json_norm_value_type_string_init(val,
                                           (const char *)je->value_begin,
                                           je_value_len);
     break;
   }
   case JSON_VALUE_NULL:
   {
-    json_temp_value_type_null_init(val);
+    json_norm_value_type_null_init(val);
     break;
   }
   case JSON_VALUE_TRUE:
   {
-    json_temp_value_type_true_init(val);
+    json_norm_value_type_true_init(val);
     break;
   }
   case JSON_VALUE_FALSE:
   {
-    json_temp_value_type_false_init(val);
+    json_norm_value_type_false_init(val);
     break;
   }
   case JSON_VALUE_ARRAY:
   {
-    err= json_temp_value_type_array_init(val);
+    err= json_norm_value_type_array_init(val);
     break;
   }
   case JSON_VALUE_OBJECT:
   {
-    err= json_temp_value_type_object_init(val);
+    err= json_norm_value_type_object_init(val);
     break;
   }
   case JSON_VALUE_NUMBER:
   {
     double number= 0;
-    err= json_temp_get_number_value(&number, je);
-    json_temp_value_type_number_init(val, number);
+    err= json_norm_get_number_value(&number, je);
+    json_norm_value_type_number_init(val, number);
     break;
   }
   default:
@@ -543,64 +538,64 @@ json_temp_value_init(struct json_temp_value *val, json_engine_t *je)
 
 
 static int
-json_temp_append_to_array(struct json_temp_value *current,
+json_norm_append_to_array(struct json_norm_value *current,
                           json_engine_t *je)
 {
   int err= 0;
-  struct json_temp_value tmp;
+  struct json_norm_value tmp;
 
   DBUG_ASSERT(current->type == JSON_VALUE_ARRAY);
   DBUG_ASSERT(je->value_type != JSON_VALUE_UNINITIALIZED);
 
-  err= json_temp_value_init(&tmp, je);
+  err= json_norm_value_init(&tmp, je);
 
   if (err)
     return 1;
 
-  err= json_temp_array_append_value(&current->value.array, &tmp);
+  err= json_norm_array_append_value(&current->value.array, &tmp);
 
   if (err)
-    json_temp_value_free(&tmp);
+    json_norm_value_free(&tmp);
 
   return err;
 }
 
 
 static int
-json_temp_append_to_object(struct json_temp_value *current,
+json_norm_append_to_object(struct json_norm_value *current,
                            DYNAMIC_STRING *key, json_engine_t *je)
 {
   int err= 0;
-  struct json_temp_value tmp;
+  struct json_norm_value tmp;
 
   DBUG_ASSERT(current->type == JSON_VALUE_OBJECT);
   DBUG_ASSERT(je->value_type != JSON_VALUE_UNINITIALIZED);
 
-  err= json_temp_value_init(&tmp, je);
+  err= json_norm_value_init(&tmp, je);
 
   if (err)
     return 1;
 
-  err= json_temp_object_append_key_value(&current->value.object, key, &tmp);
+  err= json_norm_object_append_key_value(&current->value.object, key, &tmp);
 
   if (err)
-    json_temp_value_free(&tmp);
+    json_norm_value_free(&tmp);
 
   return err;
 }
 
 
 static int
-json_temp_parse(struct json_temp_value *root, json_engine_t *je)
+json_norm_parse(struct json_norm_value *root, json_engine_t *je)
 {
   size_t current;
-  struct json_temp_value *stack[JSON_DEPTH_LIMIT];
+  struct json_norm_value *stack[JSON_DEPTH_LIMIT];
   int err= 0;
   DYNAMIC_STRING key;
 
   err= init_dynamic_string(&key, NULL, 0, 0);
   if (err)
-    goto json_temp_parse_end;
+    goto json_norm_parse_end;
 
   memset(stack, 0x00, sizeof(stack));
   current= 0;
@@ -628,22 +623,22 @@ json_temp_parse(struct json_temp_value *root, json_engine_t *je)
       /* After reading the key, we have a follow-up value. */
       err= json_read_value(je);
       if (err)
-        goto json_temp_parse_end;
+        goto json_norm_parse_end;
 
-      err= json_temp_append_to_object(stack[current], &key, je);
+      err= json_norm_append_to_object(stack[current], &key, je);
       if (err)
-        goto json_temp_parse_end;
+        goto json_norm_parse_end;
 
       if (!json_value_scalar(je))
       {
-        struct json_temp_kv *kv;
+        struct json_norm_kv *kv;
         DBUG_ASSERT(je->value_type == JSON_VALUE_ARRAY ||
                     je->value_type == JSON_VALUE_OBJECT);
-        kv= json_temp_object_get_last_element(&stack[current]->value.object);
+        kv= json_norm_object_get_last_element(&stack[current]->value.object);
 
         err= ((current + 1) == JSON_DEPTH_LIMIT);
         if (err)
-          goto json_temp_parse_end;
+          goto json_norm_parse_end;
 
         stack[current + 1]= &kv->value;
         current+= 1;
@@ -652,16 +647,16 @@ json_temp_parse(struct json_temp_value *root, json_engine_t *je)
     }
     case JST_VALUE:
     {
-      struct json_temp_array *current_arr= &stack[current]->value.array;
+      struct json_norm_array *current_arr= &stack[current]->value.array;
       err= json_read_value(je);
       if (err)
-        goto json_temp_parse_end;
+        goto json_norm_parse_end;
 
       DBUG_ASSERT(stack[current]->type == JSON_VALUE_ARRAY);
 
-      err= json_temp_append_to_array(stack[current], je);
+      err= json_norm_append_to_array(stack[current], je);
       if (err)
-        goto json_temp_parse_end;
+        goto json_norm_parse_end;
 
       if (je->value_type == JSON_VALUE_ARRAY ||
           je->value_type == JSON_VALUE_OBJECT)
@@ -669,9 +664,9 @@ json_temp_parse(struct json_temp_value *root, json_engine_t *je)
 
         err= ((current + 1) == JSON_DEPTH_LIMIT);
         if (err)
-          goto json_temp_parse_end;
+          goto json_norm_parse_end;
 
-        stack[current + 1]= json_temp_array_get_last_element(current_arr);
+        stack[current + 1]= json_norm_array_get_last_element(current_arr);
         ++current;
       }
 
@@ -696,14 +691,14 @@ json_temp_parse(struct json_temp_value *root, json_engine_t *je)
     };
   } while (json_scan_next(je) == 0);
 
-json_temp_parse_end:
+json_norm_parse_end:
   dynstr_free(&key);
   return err;
 }
 
 
 static int
-json_temp_build(struct json_temp_value *root,
+json_norm_build(struct json_norm_value *root,
                 const uchar *s, size_t size, CHARSET_INFO *cs)
 {
   int err= 0;
@@ -712,19 +707,19 @@ json_temp_build(struct json_temp_value *root,
   DBUG_ASSERT(s);
   memset(&je, 0x00, sizeof(je));
 
-  memset(root, 0x00, sizeof(struct json_temp_value));
+  memset(root, 0x00, sizeof(struct json_norm_value));
   root->type= JSON_VALUE_UNINITIALIZED;
 
   err= json_scan_start(&je, cs, s, s + size);
   if (json_read_value(&je))
     return err;
 
-  err= json_temp_value_init(root, &je);
+  err= json_norm_value_init(root, &je);
 
   if (root->type == JSON_VALUE_OBJECT ||
       root->type == JSON_VALUE_ARRAY)
   {
-    err= json_temp_parse(root, &je);
+    err= json_norm_parse(root, &je);
     if (err)
       return err;
   }
@@ -737,7 +732,7 @@ json_normalize(char *buf, size_t buf_size, const uchar *s, size_t size,
                CHARSET_INFO *cs)
 {
   int err= 0;
-  struct json_temp_value root;
+  struct json_norm_value root;
   char *rv;
 
   DBUG_ASSERT(buf);
@@ -745,17 +740,17 @@ json_normalize(char *buf, size_t buf_size, const uchar *s, size_t size,
 
   buf[0]= '\0';
 
-  err= json_temp_build(&root, s, size, cs);
+  err= json_norm_build(&root, s, size, cs);
   if (err)
     goto json_normalize_end;
 
-  json_temp_normalize_sort(&root);
+  json_normalize_sort(&root);
 
-  rv= json_temp_to_string(buf, buf_size, &root);
+  rv= json_norm_to_string(buf, buf_size, &root);
   err= rv ? 0 : 1;
 
 json_normalize_end:
-  json_temp_value_free(&root);
+  json_norm_value_free(&root);
 
   return err;
 }
