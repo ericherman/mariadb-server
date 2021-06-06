@@ -314,93 +314,97 @@ json_temp_value_free(struct json_temp_value *v)
 }
 
 
-static char *
-json_temp_to_string(char *buf, size_t size, struct json_temp_value *v)
+static int
+json_temp_to_dynamic_string(DYNAMIC_STRING *buf, struct json_temp_value *v)
 {
-  DBUG_ASSERT(buf);
-  DBUG_ASSERT(size);
-  memset(buf, 0x00, size);
-
   switch (v->type)
   {
   case JSON_VALUE_OBJECT:
   {
-    size_t i, used_buf_len;
+    size_t i;
     struct json_temp_object *obj= &v->value.object;
     DYNAMIC_ARRAY *pairs_arr= &obj->kv_pairs;
 
-    strcat(buf, "{");
+    if (dynstr_append_mem(buf, STRING_WITH_LEN("{")))
+      return 1;
 
     for (i= 0; i < pairs_arr->elements; ++i)
     {
       struct json_temp_kv *kv;
       kv= dynamic_element(pairs_arr, i, struct json_temp_kv *);
 
-      strcat(buf, "\"");
-      strcat(buf, kv->key.buf);
-      strcat(buf, "\":");
-      used_buf_len= strlen(buf);
-      /* TODO: watch out for buffer overflow. */
-      json_temp_to_string(buf + used_buf_len, size - used_buf_len, &kv->value);
+      if (dynstr_append_mem(buf, STRING_WITH_LEN("\"")) ||
+          dynstr_append(buf, kv->key.buf) ||
+          dynstr_append_mem(buf, STRING_WITH_LEN("\":")) ||
+          json_temp_to_dynamic_string(buf, &kv->value))
+        return 1;
+
       if (i != (pairs_arr->elements - 1))
-       strcat(buf, ",");
+        if (dynstr_append_mem(buf, STRING_WITH_LEN(",")))
+          return 1;
     }
-    strcat(buf, "}");
+    if (dynstr_append_mem(buf, STRING_WITH_LEN("}")))
+      return 1;
     break;
   }
   case JSON_VALUE_ARRAY:
   {
-    size_t i, used_buf_len;
+    size_t i;
     struct json_temp_array *arr= &v->value.array;
     DYNAMIC_ARRAY *values_arr= &arr->values;
 
-    strcat(buf, "[");
-    for (i= 0; i < values_arr->elements; ++i) {
+    if (dynstr_append_mem(buf, STRING_WITH_LEN("[")))
+      return 1;
+    for (i= 0; i < values_arr->elements; ++i)
+    {
       struct json_temp_value *jt_value;
       jt_value= dynamic_element(values_arr, i, struct json_temp_value *);
 
-      used_buf_len= strlen(buf);
-      json_temp_to_string(buf + used_buf_len, size - used_buf_len, jt_value);
+      if (json_temp_to_dynamic_string(buf, jt_value))
+        return 1;
       if (i != (values_arr->elements - 1))
-       strcat(buf, ",");
+        if (dynstr_append_mem(buf, STRING_WITH_LEN(",")))
+          return 1;
     }
-    strcat(buf, "]");
+    if (dynstr_append_mem(buf, STRING_WITH_LEN("]")))
+      return 1;
     break;
   }
   case JSON_VALUE_STRING:
   {
-    strcat(buf, (const char *)v->value.string.buf);
+    if (dynstr_append(buf, v->value.string.buf))
+      return 1;
     break;
   }
   case JSON_VALUE_NULL:
   {
-    strcat(buf, "null");
+    if (dynstr_append_mem(buf, STRING_WITH_LEN("null")))
+      return 1;
     break;
   }
   case JSON_VALUE_TRUE:
   {
-    strcat(buf, "true");
+    if (dynstr_append_mem(buf, STRING_WITH_LEN("true")))
+      return 1;
     break;
   }
   case JSON_VALUE_FALSE:
   {
-    strcat(buf, "false");
+    if (dynstr_append_mem(buf, STRING_WITH_LEN("false")))
+      return 1;
     break;
   }
   case JSON_VALUE_NUMBER:
   {
     double d= v->value.number;
-    my_bool err= 0;
     char dbuf[DTOA_BUFF_SIZE];
     size_t width= DTOA_BUFF_SIZE-1;
+    my_bool err= 0;
     size_t len= my_gcvt(d, MY_GCVT_ARG_DOUBLE, width, dbuf, &err);
-    (void)len;
-    if (err) {
-      /* TODO: handle err */
-      DBUG_ASSERT(0);
-    }
-    /* TODO: handle all the buffer overflow cases */
-    strcat(buf, dbuf);
+    if (err)
+      return 1;
+    if (dynstr_append_mem(buf, dbuf, len))
+      return 1;
     break;
   }
   case JSON_VALUE_UNINITIALIZED:
@@ -409,8 +413,31 @@ json_temp_to_string(char *buf, size_t size, struct json_temp_value *v)
     break;
   }
   }
-  /* TODO: handle all the buffer overflow cases */
-  return buf;
+  return 0;
+}
+
+
+static char *
+json_temp_to_string(char *out, size_t size, struct json_temp_value *v)
+{
+  DYNAMIC_STRING buf;
+  int err;
+
+  DBUG_ASSERT(out);
+  DBUG_ASSERT(size);
+  memset(out, 0x00, size);
+
+  if (init_dynamic_string(&buf, NULL, 0, 0))
+    return NULL;
+
+  err= json_temp_to_dynamic_string(&buf, v);
+
+  if (!err)
+    strncpy(out, buf.str, size);
+
+  dynstr_free(&buf);
+
+  return err ? NULL : out;
 }
 
 
