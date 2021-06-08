@@ -173,30 +173,37 @@ json_norm_array_append_value(struct json_norm_array *arr,
 
 
 int
-json_norm_value_object_init(struct json_norm_value *val)
+json_norm_init_dynmic_array(size_t element_size, void *where)
 {
   const uint init_alloc= 20;
   const uint alloc_increment= 20;
+  return my_init_dynamic_array(PSI_JSON, where, element_size,
+                               init_alloc, alloc_increment,
+                               MYF(MY_THREAD_SPECIFIC|MY_WME));
+}
+
+
+int
+json_norm_value_object_init(struct json_norm_value *val)
+{
   const size_t element_size= sizeof(struct json_norm_kv);
   struct json_norm_object *obj= &val->value.object;
+
   val->type= JSON_VALUE_OBJECT;
-  return my_init_dynamic_array(PSI_JSON, &obj->kv_pairs,
-         element_size, init_alloc, alloc_increment,
-         MYF(MY_THREAD_SPECIFIC|MY_WME));
+
+  return json_norm_init_dynmic_array(element_size, &obj->kv_pairs);
 }
 
 
 int
 json_norm_value_array_init(struct json_norm_value *val)
 {
-  const uint init_alloc= 20;
-  const uint alloc_increment= 20;
   const size_t element_size= sizeof(struct json_norm_value);
   struct json_norm_array *array= &val->value.array;
+
   val->type= JSON_VALUE_ARRAY;
-  return my_init_dynamic_array(PSI_JSON, &array->values,
-           element_size, init_alloc, alloc_increment,
-           MYF(MY_THREAD_SPECIFIC|MY_WME));
+
+  return json_norm_init_dynmic_array(element_size, &array->values);
 }
 
 
