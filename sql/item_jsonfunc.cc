@@ -404,34 +404,52 @@ bool Item_func_json_equals::fix_length_and_dec()
 
 longlong Item_func_json_equals::val_int()
 {
+  longlong result= 0;
 
   String a_tmp, b_tmp;
 
   String *a= args[0]->val_json(&a_tmp);
   String *b= args[1]->val_json(&b_tmp);
 
+  DYNAMIC_STRING a_res;
+  if (init_dynamic_string(&a_res, NULL, 0, 0))
+  {
+    null_value= 1;
+    return 1;
+  }
+
+  DYNAMIC_STRING b_res;
+  if (init_dynamic_string(&b_res, NULL, 0, 0))
+  {
+    dynstr_free(&a_res);
+    null_value= 1;
+    return 1;
+  }
+
   if ((null_value= args[0]->null_value || args[1]->null_value))
   {
     null_value= 1;
-    return 0;
+    goto end;
   }
 
-  // TODO: Pass DYNAMIC_STRING to json_normalize.
-  char a_buf[1000];
-  char b_buf[1000];
-  if (json_normalize(a_buf, sizeof(a_buf),
-                     a->c_ptr(), a->length(), a->charset()))
-    goto err_return;
+  if (json_normalize(&a_res, a->c_ptr(), a->length(), a->charset()))
+  {
+    null_value= 1;
+    goto end;
+  }
 
-  if (json_normalize(b_buf, sizeof(b_buf),
-                     b->c_ptr(), b->length(), b->charset()))
-    goto err_return;
+  if (json_normalize(&b_res, b->c_ptr(), b->length(), b->charset()))
+  {
+    null_value= 1;
+    goto end;
+  }
 
-  return strcmp(a_buf, b_buf) ? 0 : 1;
+  result= strcmp(a_res.str, b_res.str) ? 0 : 1;
 
-err_return:
-  null_value= 1;
-  return 0;
+end:
+  dynstr_free(&b_res);
+  dynstr_free(&a_res);
+  return result;
 }
 
 

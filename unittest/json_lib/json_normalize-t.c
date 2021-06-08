@@ -1,4 +1,4 @@
-/* Copyright (c) 2016, MariaDB Corp. All rights reserved.
+/* Copyright (c) 2021 Eric Herman and MariaDB Foundation.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -25,49 +25,57 @@
 static void
 check_json_normalize(const char *in, const char *expected)
 {
-  const size_t actual_size= 1024;
-  char actual[1024]; /* C89 */
+  int err;
+  DYNAMIC_STRING result;
 
   const size_t msg_size= 1024;
   char msg[1024]; /* C89 */
 
   CHARSET_INFO *cs= &my_charset_utf8mb4_general_ci;
 
-  int err= json_normalize(actual, actual_size, in, strlen(in), cs);
+  init_dynamic_string(&result, NULL, 0, 0);
+
+  err= json_normalize(&result, in, strlen(in), cs);
 
   ok(err == 0, "normalize err?");
 
   snprintf(msg, msg_size,
-           "expected '%s' from '%s' but was '%s'", expected, in, actual);
+           "expected '%s' from '%s' but was '%s'",
+           expected, in, result.str);
 
-  ok(strcmp(expected, actual) == 0, msg);
+  ok(strcmp(expected, result.str) == 0, msg);
+
+  dynstr_free(&result);
 }
+
 
 static void
 test_json_normalize_invalid(void)
 {
-  const size_t actual_size= 1024;
-  char actual[1024]; /* C89 */
+  DYNAMIC_STRING result;
 
   CHARSET_INFO *cs= &my_charset_utf8mb4_general_ci;
 
-  ok(json_normalize(actual, actual_size,
-                    STRING_WITH_LEN(""), cs) != 0,
+  init_dynamic_string(&result, NULL, 0, 0);
+  ok(json_normalize(&result, STRING_WITH_LEN(""), cs) != 0,
      "expected normalized error");
+  dynstr_free(&result);
 
-  ok(json_normalize(actual, actual_size,
-                    STRING_WITH_LEN("["), cs) != 0,
+  init_dynamic_string(&result, NULL, 0, 0);
+  ok(json_normalize(&result, STRING_WITH_LEN("["), cs) != 0,
      "expected normalized error");
+  dynstr_free(&result);
 
-  ok(json_normalize(actual, actual_size,
-                    STRING_WITH_LEN("}"), cs) != 0,
+  init_dynamic_string(&result, NULL, 0, 0);
+  ok(json_normalize(&result, STRING_WITH_LEN("}"), cs) != 0,
      "expected normalized error");
+  dynstr_free(&result);
 
-  ok(json_normalize(actual, actual_size,
-                    NULL, 0, cs) != 0,
+  init_dynamic_string(&result, NULL, 0, 0);
+  ok(json_normalize(&result, NULL, 0, cs) != 0,
      "expected normalized error");
+  dynstr_free(&result);
 }
-
 
 
 static void

@@ -1,4 +1,4 @@
-/* Copyright (c) 2021 Eric Herman, MariaDB Foundation.
+/* Copyright (c) 2021 Eric Herman and MariaDB Foundation.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -314,7 +314,7 @@ json_norm_value_free(struct json_norm_value *val)
 
 
 static int
-json_norm_to_dynamic_string(DYNAMIC_STRING *buf, struct json_norm_value *val)
+json_norm_to_string(DYNAMIC_STRING *buf, struct json_norm_value *val)
 {
   switch (val->type)
   {
@@ -335,7 +335,7 @@ json_norm_to_dynamic_string(DYNAMIC_STRING *buf, struct json_norm_value *val)
       if (dynstr_append_mem(buf, STRING_WITH_LEN("\"")) ||
           dynstr_append(buf, kv->key.str) ||
           dynstr_append_mem(buf, STRING_WITH_LEN("\":")) ||
-          json_norm_to_dynamic_string(buf, &kv->value))
+          json_norm_to_string(buf, &kv->value))
         return 1;
 
       if (i != (pairs_arr->elements - 1))
@@ -359,7 +359,7 @@ json_norm_to_dynamic_string(DYNAMIC_STRING *buf, struct json_norm_value *val)
       struct json_norm_value *jt_value;
       jt_value= dynamic_element(values_arr, i, struct json_norm_value *);
 
-      if (json_norm_to_dynamic_string(buf, jt_value))
+      if (json_norm_to_string(buf, jt_value))
         return 1;
       if (i != (values_arr->elements - 1))
         if (dynstr_append_mem(buf, STRING_WITH_LEN(",")))
@@ -413,30 +413,6 @@ json_norm_to_dynamic_string(DYNAMIC_STRING *buf, struct json_norm_value *val)
   }
   }
   return 0;
-}
-
-
-static char *
-json_norm_to_string(char *out, size_t size, struct json_norm_value *val)
-{
-  DYNAMIC_STRING buf;
-  int err;
-
-  DBUG_ASSERT(out);
-  DBUG_ASSERT(size);
-  memset(out, 0x00, size);
-
-  if (init_dynamic_string(&buf, NULL, 0, 0))
-    return NULL;
-
-  err= json_norm_to_dynamic_string(&buf, val);
-
-  if (!err)
-    strncpy(out, buf.str, size);
-
-  dynstr_free(&buf);
-
-  return err ? NULL : out;
 }
 
 
@@ -731,17 +707,13 @@ json_norm_build(struct json_norm_value *root,
 
 
 int
-json_normalize(char *buf, size_t buf_size,
+json_normalize(DYNAMIC_STRING *result,
                const char *s, size_t size, CHARSET_INFO *cs)
 {
   int err= 0;
   struct json_norm_value root;
-  char *rv;
 
-  DBUG_ASSERT(buf);
-  DBUG_ASSERT(buf_size);
-
-  buf[0]= '\0';
+  DBUG_ASSERT(result);
 
   if (!json_valid(s, size, cs))
     return 1;
@@ -752,11 +724,12 @@ json_normalize(char *buf, size_t buf_size,
 
   json_normalize_sort(&root);
 
-  rv= json_norm_to_string(buf, buf_size, &root);
-  err= rv ? 0 : 1;
+  err= json_norm_to_string(result, &root);
 
 json_normalize_end:
   json_norm_value_free(&root);
+  if (err)
+    dynstr_free(result);
 
   return err;
 }
