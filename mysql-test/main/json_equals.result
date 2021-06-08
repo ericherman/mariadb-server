@@ -1,0 +1,15 @@
+select json_equals("{}", "{}");
+json_equals("{}", "{}")
+1
+select json_equals("{}", "[]");
+json_equals("{}", "[]")
+0
+select json_equals("{}", NULL);
+json_equals("{}", NULL)
+NULL
+select json_equals("", "");
+json_equals("", "")
+NULL
+select json_equals("", 1);
+json_equals("", 1)
+NULL

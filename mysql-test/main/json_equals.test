@@ -1,0 +1,10 @@
+
+select json_equals("{}", "{}");
+
+select json_equals("{}", "[]");
+
+select json_equals("{}", NULL);
+
+select json_equals("", "");
+
+select json_equals("", 1);

@@ -393,6 +393,49 @@ longlong Item_func_json_valid::val_int()
 }
 
 
+bool Item_func_json_equals::fix_length_and_dec()
+{
+  if (Item_bool_func::fix_length_and_dec())
+    return TRUE;
+  set_maybe_null();
+  return FALSE;
+}
+
+
+longlong Item_func_json_equals::val_int()
+{
+
+  String a_tmp, b_tmp;
+
+  String *a= args[0]->val_json(&a_tmp);
+  String *b= args[1]->val_json(&b_tmp);
+
+  if ((null_value= args[0]->null_value || args[1]->null_value))
+  {
+    null_value= 1;
+    return 0;
+  }
+
+  // TODO: Pass DYNAMIC_STRING to json_normalize.
+  char a_buf[1000];
+  char b_buf[1000];
+  if (json_normalize(a_buf, sizeof(a_buf),
+                     a->c_ptr(), a->length(), a->charset()))
+    goto err_return;
+
+  if (json_normalize(b_buf, sizeof(b_buf),
+                     b->c_ptr(), b->length(), b->charset()))
+    goto err_return;
+
+  return strcmp(a_buf, b_buf) ? 0 : 1;
+
+err_return:
+  null_value= 1;
+  return 0;
+}
+
+
+
 bool Item_func_json_exists::fix_length_and_dec()
 {
   if (Item_bool_func::fix_length_and_dec())

@@ -431,6 +431,9 @@ int json_locate_key(const char *js, const char *js_end,
                     const char **key_start, const char **key_end,
                     int *comma_pos);
 
+int json_normalize(char *buf, size_t buf_size,
+                   const char *s, size_t size, CHARSET_INFO *cs);
+
 #ifdef  __cplusplus
 }
 #endif
