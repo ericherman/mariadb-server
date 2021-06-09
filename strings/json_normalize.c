@@ -608,19 +608,17 @@ json_norm_parse(struct json_norm_value *root, json_engine_t *je)
       if (err)
         goto json_norm_parse_end;
 
-      if (!json_value_scalar(je))
+      if (je->value_type == JSON_VALUE_ARRAY ||
+          je->value_type == JSON_VALUE_OBJECT)
       {
         struct json_norm_kv *kv;
-        DBUG_ASSERT(je->value_type == JSON_VALUE_ARRAY ||
-                    je->value_type == JSON_VALUE_OBJECT);
-        kv= json_norm_object_get_last_element(&stack[current]->value.object);
 
         err= ((current + 1) == JSON_DEPTH_LIMIT);
         if (err)
           goto json_norm_parse_end;
 
-        stack[current + 1]= &kv->value;
-        current+= 1;
+        kv= json_norm_object_get_last_element(&stack[current]->value.object);
+        stack[++current]= &kv->value;
       }
       break;
     }
@@ -645,8 +643,7 @@ json_norm_parse(struct json_norm_value *root, json_engine_t *je)
         if (err)
           goto json_norm_parse_end;
 
-        stack[current + 1]= json_norm_array_get_last_element(current_arr);
-        ++current;
+        stack[++current]= json_norm_array_get_last_element(current_arr);
       }
 
       break;
