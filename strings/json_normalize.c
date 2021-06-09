@@ -82,7 +82,7 @@ struct json_norm_kv {
 static void *
 json_norm_malloc(size_t size)
 {
-  return my_malloc(PSI_JSON, size, MYF(MY_THREAD_SPECIFIC|MY_WME));
+  return my_malloc(PSI_JSON, size, MYF(0));
 }
 
 
@@ -217,6 +217,9 @@ static int
 json_norm_kv_comp(const struct json_norm_kv *a,
                   const struct json_norm_kv *b)
 {
+  /* This should be a Lexicographic comparison, which orders strings
+     from least to greatest alphabetically based on the Unicode code
+     points, but this will work for our purpose. */
   return strcmp(a->key.str, b->key.str);
 }
 
@@ -395,6 +398,9 @@ json_norm_to_string(DYNAMIC_STRING *buf, struct json_norm_value *val)
   }
   case JSON_VALUE_NUMBER:
   {
+    /* Representation of numbers is not clearly spelled-out in the expired
+       draft-staykov-hu-json-canonical-form-00 thus we will go with my_gcvt
+       as that will work for our purpose.  */
     double d= val->value.number;
     char dbuf[DTOA_BUFF_SIZE];
     size_t width= DTOA_BUFF_SIZE-1;
@@ -708,14 +714,53 @@ json_normalize(DYNAMIC_STRING *result,
                const char *s, size_t size, CHARSET_INFO *cs)
 {
   int err= 0;
+  uint convert_err= 0;
   struct json_norm_value root;
+  char *s_utf8= NULL;
+  size_t in_size;
+  const char *in;
 
   DBUG_ASSERT(result);
 
-  if (!json_valid(s, size, cs))
-    return 1;
+  memset(&root, 0x00, sizeof(root));
+  root.type = JSON_VALUE_UNINITIALIZED;
 
-  err= json_norm_build(&root, s, size, cs);
+  /*
+     Convert the incoming string to utf8mb4_bin before doing any other work.
+     According to JSON RFC 8259, between systems JSON must be UTF-8
+     https://datatracker.ietf.org/doc/html/rfc8259#section-8.1
+  */
+  if (cs == &my_charset_utf8mb4_bin)
+  {
+    in= s;
+    in_size= size;
+  }
+  else
+  {
+    in_size= (size * my_charset_utf8mb4_bin.mbmaxlen) + 1;
+    s_utf8= json_norm_malloc(in_size);
+    if (!s_utf8)
+      return 1;
+    memset(s_utf8, 0x00, in_size);
+    my_convert(s_utf8, in_size, &my_charset_utf8mb4_bin,
+               s, size, cs, &convert_err);
+    if (convert_err)
+    {
+       my_free(s_utf8);
+       return 1;
+    }
+    in= s_utf8;
+    in_size= strlen(s_utf8);
+  }
+
+
+  if (!json_valid(in, in_size, &my_charset_utf8mb4_bin))
+  {
+    err= 1;
+    goto json_normalize_end;
+  }
+
+  err= json_norm_build(&root, in, in_size, &my_charset_utf8mb4_bin);
   if (err)
     goto json_normalize_end;
 
@@ -727,7 +772,8 @@ json_normalize_end:
   json_norm_value_free(&root);
   if (err)
     dynstr_free(result);
-
+  if (s_utf8)
+    my_free(s_utf8);
   return err;
 }
 

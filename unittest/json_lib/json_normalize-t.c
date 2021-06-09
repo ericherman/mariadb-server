@@ -195,11 +195,35 @@ test_json_normalize_nested_deep(void)
 }
 
 
+static void
+test_json_normalize_non_utf8(void)
+{
+  int err;
+  const char utf8[]= { 0x22, 0xC3, 0x8A, 0x22, 0x00 };
+  const char latin[] = { 0x22, 0xCA, 0x22, 0x00 };
+  DYNAMIC_STRING result;
+  CHARSET_INFO *cs_utf8= &my_charset_utf8mb4_bin;
+  CHARSET_INFO *cs_latin= &my_charset_latin1;
+
+  init_dynamic_string(&result, NULL, 0, 0);
+  err= json_normalize(&result, utf8, strlen(utf8), cs_utf8);
+  ok(err == 0, "normalize err?");
+  ok((strcmp(utf8, result.str) == 0), "utf8 round trip");
+  dynstr_free(&result);
+
+  init_dynamic_string(&result, NULL, 0, 0);
+  err= json_normalize(&result, latin, strlen(latin), cs_latin);
+  ok(err == 0, "normalize err?");
+  ok((strcmp(utf8, result.str) == 0), "latin to utf8 round trip");
+  dynstr_free(&result);
+}
+
+
 int
 main(void)
 {
 
-  plan(46);
+  plan(50);
   diag("Testing json_normalization.");
 
   test_json_normalize_invalid();
@@ -210,6 +234,7 @@ main(void)
   test_json_normalize_nested_objects();
   test_json_normalize_nested_arrays();
   test_json_normalize_nested_deep();
+  test_json_normalize_non_utf8();
 
   return exit_status();
 }
