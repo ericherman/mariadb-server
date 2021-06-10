@@ -26,6 +26,10 @@
 #define PSI_JSON PSI_NOT_INSTRUMENTED
 #endif
 
+#ifndef JSON_MALLOC_FLAGS
+#define JSON_MALLOC_FLAGS MYF(MY_THREAD_SPECIFIC|MY_WME)
+#endif
+
 /*
 From the EXPIRED DRAFT JSON Canonical Form
 https://datatracker.ietf.org/doc/html/draft-staykov-hu-json-canonical-form-00
@@ -82,7 +86,7 @@ struct json_norm_kv {
 static void *
 json_norm_malloc(size_t size)
 {
-  return my_malloc(PSI_JSON, size, MYF(0));
+  return my_malloc(PSI_JSON, size, JSON_MALLOC_FLAGS);
 }
 
 
@@ -176,7 +180,7 @@ json_norm_init_dynmic_array(size_t element_size, void *where)
   const uint alloc_increment= 20;
   return my_init_dynamic_array(PSI_JSON, where, element_size,
                                init_alloc, alloc_increment,
-                               MYF(MY_THREAD_SPECIFIC|MY_WME));
+                               JSON_MALLOC_FLAGS);
 }
 
 
