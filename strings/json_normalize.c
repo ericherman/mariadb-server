@@ -407,7 +407,7 @@ json_norm_to_string(DYNAMIC_STRING *buf, struct json_norm_value *val)
        as that will work for our purpose.  */
     double d= val->value.number;
     char dbuf[DTOA_BUFF_SIZE];
-    size_t width= DTOA_BUFF_SIZE-1;
+    int width= DTOA_BUFF_SIZE-1;
     my_bool err= 0;
     size_t len= my_gcvt(d, MY_GCVT_ARG_DOUBLE, width, dbuf, &err);
     if (err)
