@@ -178,7 +178,7 @@ json_norm_init_dynmic_array(size_t element_size, void *where)
 {
   const uint init_alloc= 20;
   const uint alloc_increment= 20;
-  return my_init_dynamic_array(PSI_JSON, where, element_size,
+  return my_init_dynamic_array(PSI_JSON, where, (uint)element_size,
                                init_alloc, alloc_increment,
                                JSON_MALLOC_FLAGS);
 }
