@@ -195,6 +195,11 @@ test_json_normalize_nested_deep(void)
 }
 
 
+/* a "friend" function */
+int
+json_normalize_number(DYNAMIC_STRING *out, const char *str, size_t str_len);
+
+
 static void
 test_json_normalize_non_utf8(void)
 {
@@ -219,12 +224,52 @@ test_json_normalize_non_utf8(void)
 }
 
 
+void
+check_number_normalize(const char *in, const char *expected)
+{
+  int err;
+  DYNAMIC_STRING buf;
+  const size_t msg_size= 1024;
+  char msg[1024]; /* C89 */
+
+  init_dynamic_string(&buf, NULL, 0, 0);
+
+  err= json_normalize_number(&buf, in, strlen(in));
+	ok(err == 0, "normalize number err?");
+
+	snprintf(msg, msg_size, "expected: %s\n"
+                          " but was: %s\n"
+                          "    from: %s\n", expected, buf.str, in);
+  ok(strcmp(buf.str, expected) == 0, msg);
+
+  dynstr_free(&buf);
+}
+
+
 int
 main(void)
 {
-
-  plan(50);
+  plan(86);
   diag("Testing json_normalization.");
+
+	check_number_normalize("0", "0.0E0");
+	check_number_normalize("-0.0", "0.0E0");
+	check_number_normalize("0E100", "0.0E0");
+	check_number_normalize("0.000000E100", "0.0E0");
+	check_number_normalize("-0E100", "0.0E0");
+	check_number_normalize("-0.000E100", "0.0E0");
+	check_number_normalize("1", "1.0E0");
+	check_number_normalize("-1", "-1.0E0");
+	check_number_normalize("36", "3.6E1");
+	check_number_normalize("37.000", "3.7E1");
+	check_number_normalize("3.000", "3.0E0");
+	check_number_normalize("0.00012345", "1.2345E-4");
+	check_number_normalize("32.14e234", "3.214E235");
+	check_number_normalize("0.00357e-23", "3.57E-26");
+	check_number_normalize("0.00357e23", "3.57E20");
+	check_number_normalize("123.456e10", "1.23456E12");
+	check_number_normalize("123.456e-9", "1.23456E-7");
+	check_number_normalize("0000123.456000000e-9", "1.23456E-7");
 
   test_json_normalize_invalid();
   test_json_normalize_values();
@@ -238,3 +283,4 @@ main(void)
 
   return exit_status();
 }
+

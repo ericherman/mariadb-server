@@ -114,6 +114,91 @@ json_norm_string_free(LEX_STRING *string)
   string->length= 0;
 }
 
+int
+json_normalize_number(DYNAMIC_STRING *out, const char *str, size_t str_len)
+{
+  int err= 0;
+  long int magnitude= 0;
+  int negative= 0;
+  size_t i= 0;
+  size_t j= 0;
+  size_t k= 0;
+  char *buf= NULL;
+  size_t buf_size = str_len + 1;
+
+  buf= json_norm_malloc(buf_size);
+  if (!buf)
+    return 1;
+
+  memset(buf, 0x00, buf_size);
+
+  if (str[0] == '-')
+  {
+    negative= 1;
+    ++i;
+  }
+
+  /* grab digits preceding the decimal */
+  for (; i < str_len && str[i] != '.' && str[i] != 'e' && str[i] != 'E'; ++i)
+    buf[j++] = str[i];
+
+  magnitude = (j - 1);
+
+  /* skip the . */
+  if (str[i] == '.')
+    ++i;
+
+  /* grab rest of digits before the E */
+  for (; i < str_len && str[i] != 'e' && str[i] != 'E'; ++i)
+    buf[j++] = str[i];
+
+  /* trim trailing zeros */
+  for (k = j - 1; k && buf[k] == '0'; --k, --j)
+    buf[k] = '\0';
+
+  /* trim the leading zeros */
+  for (k = 0; buf[k] && buf[k] == '0'; ++k);
+  if (k)
+  {
+    memmove(buf, buf + k, j - k);
+    j = j - k;
+    buf[j] = '\0';
+    magnitude -= k;
+  }
+
+  if (!j)
+  {
+    err= dynstr_append_mem(out, STRING_WITH_LEN("0.0E0"));
+    my_free(buf);
+    return err;
+  }
+
+  if (negative)
+    err|= dynstr_append_mem(out, STRING_WITH_LEN("-"));
+  err|= dynstr_append_mem(out, buf, 1);
+  err|= dynstr_append_mem(out, STRING_WITH_LEN("."));
+  if (j == 1)
+    err|= dynstr_append_mem(out, STRING_WITH_LEN("0"));
+  else
+    err|= dynstr_append(out, buf + 1);
+
+  err|= dynstr_append_mem(out, STRING_WITH_LEN("E"));
+
+  if (str[i] == 'e' || str[i] == 'E')
+  {
+    char *endptr = NULL;
+    /* skip the [eE] */
+    ++i;
+    /* combine the exponent with current magnitude */
+    magnitude += strtol(str + i, &endptr, 10);
+  }
+  snprintf(buf, buf_size, "%ld", magnitude);
+  err|= dynstr_append(out, buf);
+
+  my_free(buf);
+  return err ? 1 : 0;
+}
+
 
 static int
 json_norm_object_append_key_value(struct json_norm_object *obj,
@@ -174,7 +259,7 @@ json_norm_array_append_value(struct json_norm_array *arr,
 
 
 int
-json_norm_init_dynmic_array(size_t element_size, void *where)
+json_norm_init_dynamic_array(size_t element_size, void *where)
 {
   const uint init_alloc= 20;
   const uint alloc_increment= 20;
@@ -192,7 +277,7 @@ json_norm_value_object_init(struct json_norm_value *val)
 
   val->type= JSON_VALUE_OBJECT;
 
-  return json_norm_init_dynmic_array(element_size, &obj->kv_pairs);
+  return json_norm_init_dynamic_array(element_size, &obj->kv_pairs);
 }
 
 
@@ -204,7 +289,7 @@ json_norm_value_array_init(struct json_norm_value *val)
 
   val->type= JSON_VALUE_ARRAY;
 
-  return json_norm_init_dynmic_array(element_size, &array->values);
+  return json_norm_init_dynamic_array(element_size, &array->values);
 }
 
 
