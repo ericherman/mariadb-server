@@ -151,7 +151,7 @@ json_normalize_number(DYNAMIC_STRING *out, const char *str, size_t str_len)
   for (; i < str_len && str[i] != '.' && str[i] != 'e' && str[i] != 'E'; ++i)
     buf[j++] = str[i];
 
-  magnitude = (j - 1);
+  magnitude = (long)(j - 1);
 
   /* skip the . */
   if (str[i] == '.')
@@ -172,7 +172,7 @@ json_normalize_number(DYNAMIC_STRING *out, const char *str, size_t str_len)
     memmove(buf, buf + k, j - k);
     j = j - k;
     buf[j] = '\0';
-    magnitude -= k;
+    magnitude -= (long)k;
   }
 
   if (!j)
