@@ -28,8 +28,8 @@ check_json_normalize(const char *in, const char *expected)
   int err;
   DYNAMIC_STRING result;
 
-  const size_t msg_size= 1024;
-  char msg[1024]; /* C89 */
+  const size_t msg_size= 4096;
+  char msg[4096]; /* C89 */
 
   CHARSET_INFO *cs= &my_charset_utf8mb4_general_ci;
 
@@ -124,14 +124,14 @@ test_json_normalize_values(void)
   check_json_normalize("\"\"", "\"\"");
   check_json_normalize("{}", "{}");
   check_json_normalize("[]", "[]");
-  check_json_normalize("5", "5");
-  check_json_normalize("5.1", "5.1");
-  check_json_normalize("-5.1", "-5.1");
-  check_json_normalize("12345.67890", "12345.6789");
-  check_json_normalize("2.99792458e8", "299792458");
-  check_json_normalize("6.02214076e23", "6.02214076e23");
-  check_json_normalize("6.62607015e-34", "6.62607015e-34");
-  check_json_normalize("-6.62607015e-34", "-6.62607015e-34");
+  check_json_normalize("5", "5.0E0");
+  check_json_normalize("5.1", "5.1E0");
+  check_json_normalize("-5.1", "-5.1E0");
+  check_json_normalize("12345.67890", "1.23456789E4");
+  check_json_normalize("2.99792458e8", "2.99792458E8");
+  check_json_normalize("6.02214076e23", "6.02214076E23");
+  check_json_normalize("6.62607015e-34", "6.62607015E-34");
+  check_json_normalize("-6.62607015e-34", "-6.62607015E-34");
 }
 
 
@@ -184,11 +184,11 @@ test_json_normalize_nested_deep(void)
     "\"foo\":\"value\","
     "\"wiz\":["
                "true,false,"
-               "{\"alpha\":12345.6789,\"bang\":\"a\"},"
+               "{\"alpha\":1.23456789E4,\"bang\":\"a\"},"
                "\"string\","
                "{\"a\":\"two\",\"b\":\"one\",\"c\":\"three\"},"
                "false,"
-               "[-1.2,\"w\",\"x\"]"
+               "[-1.2E0,\"w\",\"x\"]"
             "]"
   "}";
   check_json_normalize(in, expected);

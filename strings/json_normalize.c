@@ -69,7 +69,7 @@ struct json_norm_object {
 struct json_norm_value {
   enum json_value_types type;
   union {
-    double number;
+    DYNAMIC_STRING number;
     LEX_STRING string;
     struct json_norm_array array;
     struct json_norm_object object;
@@ -113,6 +113,15 @@ json_norm_string_free(LEX_STRING *string)
   string->str= NULL;
   string->length= 0;
 }
+
+
+void
+json_norm_number_free(DYNAMIC_STRING *number)
+{
+  dynstr_free(number);
+  number->length= 0;
+}
+
 
 int
 json_normalize_number(DYNAMIC_STRING *out, const char *str, size_t str_len)
@@ -395,6 +404,8 @@ json_norm_value_free(struct json_norm_value *val)
     break;
   }
   case JSON_VALUE_NUMBER:
+    json_norm_number_free(&val->value.number);
+    break;
   case JSON_VALUE_NULL:
   case JSON_VALUE_TRUE:
   case JSON_VALUE_FALSE:
@@ -487,17 +498,7 @@ json_norm_to_string(DYNAMIC_STRING *buf, struct json_norm_value *val)
   }
   case JSON_VALUE_NUMBER:
   {
-    /* Representation of numbers is not clearly spelled-out in the expired
-       draft-staykov-hu-json-canonical-form-00 thus we will go with my_gcvt
-       as that will work for our purpose.  */
-    double d= val->value.number;
-    char dbuf[DTOA_BUFF_SIZE];
-    int width= DTOA_BUFF_SIZE-1;
-    my_bool err= 0;
-    size_t len= my_gcvt(d, MY_GCVT_ARG_DOUBLE, width, dbuf, &err);
-    if (err)
-      return 1;
-    if (dynstr_append_mem(buf, dbuf, len))
+    if (dynstr_append(buf, val->value.number.str))
       return 1;
     break;
   }
@@ -512,29 +513,18 @@ json_norm_to_string(DYNAMIC_STRING *buf, struct json_norm_value *val)
 
 
 static int
-json_norm_get_number_value(double *number, json_engine_t *je)
+json_norm_value_number_init(struct json_norm_value *val,
+                            const char *number, size_t num_len)
 {
-  int err= 0;
-  const char *begin= (const char *)je->value_begin;
-  char *end= (char *)je->value_end;
-
-  double d= my_strtod(begin, &end, &err);
+  int err;
+  val->type= JSON_VALUE_NUMBER;
+  err= init_dynamic_string(&val->value.number, NULL, 0, 0);
   if (err)
     return 1;
-
-  /* https://datatracker.ietf.org/doc/html/rfc8259#section-6 */
-  DBUG_ASSERT(d == d); /* NaN is not valid JSON */
-
-  *number= d;
-  return 0;
-}
-
-
-static void
-json_norm_value_number_init(struct json_norm_value *val, double n)
-{
-  val->type= JSON_VALUE_NUMBER;
-  val->value.number= n;
+  err= json_normalize_number(&val->value.number, number, num_len);
+  if (err)
+    dynstr_free(&val->value.number);
+  return err;
 }
 
 
@@ -598,9 +588,9 @@ json_norm_value_init(struct json_norm_value *val, json_engine_t *je)
   }
   case JSON_VALUE_NUMBER:
   {
-    double number= 0;
-    err= json_norm_get_number_value(&number, je);
-    json_norm_value_number_init(val, number);
+    const char *je_number_begin= (const char *)je->value_begin;
+    size_t je_number_len= (je->value_end - je->value_begin);
+    err= json_norm_value_number_init(val, je_number_begin, je_number_len);
     break;
   }
   default:
