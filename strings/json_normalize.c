@@ -315,10 +315,9 @@ static int
 json_norm_kv_comp(const struct json_norm_kv *a,
                   const struct json_norm_kv *b)
 {
-  /* This should be a Lexicographic comparison, which orders strings
-     from least to greatest alphabetically based on the Unicode code
-     points, but this will work for our purpose. */
-  return strcmp(a->key.str, b->key.str);
+  return my_strnncoll(&my_charset_utf8mb4_bin,
+                      (const uchar *)a->key.str, a->key.length,
+                      (const uchar *)b->key.str, b->key.length);
 }
 
 
