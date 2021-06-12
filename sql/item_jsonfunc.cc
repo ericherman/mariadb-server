@@ -3940,3 +3940,48 @@ String* Item_func_json_objectagg::val_str(String* str)
 }
 
 
+String *Item_func_json_normalize::val_str(String *buf)
+{
+  String tmp;
+  String *raw_json= args[0]->val_str(&tmp);
+
+  DYNAMIC_STRING normalized_json;
+  if (init_dynamic_string(&normalized_json, NULL, 0, 0))
+  {
+    null_value= 1;
+    return NULL;
+  }
+
+  null_value= args[0]->null_value;
+  if (null_value)
+    goto end;
+
+  if (json_normalize(&normalized_json,
+                     raw_json->c_ptr(), raw_json->length(),
+                     raw_json->charset()))
+  {
+    null_value= 1;
+    goto end;
+  }
+
+  buf->length(0);
+  if (buf->append(normalized_json.str, normalized_json.length))
+  {
+    null_value= 1;
+    goto end;
+  }
+
+end:
+  dynstr_free(&normalized_json);
+  return null_value ? NULL : buf;
+}
+
+
+bool Item_func_json_normalize::fix_length_and_dec()
+{
+  // This might need to be bin coll.
+  collation.set(args[0]->collation);
+  max_length= args[0]->max_length;
+  set_maybe_null();
+  return FALSE;
+}
