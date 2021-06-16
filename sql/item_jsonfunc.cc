@@ -3979,9 +3979,9 @@ end:
 
 bool Item_func_json_normalize::fix_length_and_dec()
 {
-  // This might need to be bin coll.
-  collation.set(args[0]->collation);
-  max_length= args[0]->max_length;
+  collation.set(&my_charset_utf8mb4_bin);
+  /* 0 becomes 0.0E0, thus one character becomes 5 chars */
+  fix_char_length_ulonglong((ulonglong) args[0]->max_char_length() * 5);
   set_maybe_null();
   return FALSE;
 }
