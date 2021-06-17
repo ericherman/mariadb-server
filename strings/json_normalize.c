@@ -14,8 +14,6 @@
    Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 #include <my_global.h>
-#include <my_sys.h> /* my_malloc */
-#include <m_ctype.h> /* TODO: this should be in json_lib.h */
 #include <json_lib.h>
 
 #ifndef DTOA_BUFF_SIZE

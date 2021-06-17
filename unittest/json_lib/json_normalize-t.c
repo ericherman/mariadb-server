@@ -17,8 +17,6 @@
 #include "config.h"
 #include <tap.h>
 #include <my_global.h>
-#include <my_sys.h> /* my_malloc */
-#include <m_ctype.h> /* TODO: this should be in json_lib.h */
 #include <json_lib.h>
 
 
