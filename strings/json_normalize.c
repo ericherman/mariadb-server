@@ -16,10 +16,6 @@
 #include <my_global.h>
 #include <json_lib.h>
 
-#ifndef DTOA_BUFF_SIZE
-#define DTOA_BUFF_SIZE (460 * sizeof(void *))
-#endif
-
 #ifndef PSI_JSON
 #define PSI_JSON PSI_NOT_INSTRUMENTED
 #endif
