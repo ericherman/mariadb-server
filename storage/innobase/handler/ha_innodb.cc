@@ -9218,6 +9218,33 @@ ha_innobase::change_active_index(
 	DBUG_RETURN(0);
 }
 
+
+ulonglong
+kill_performance(FILE *log, ulonglong jitter)
+{
+	/*********************************************/
+	/* XXX: START: This should kill performance! */
+	/*********************************************/
+	ulonglong fibn0 = 0;
+	ulonglong fibn1 = 1;
+	ulonglong fibn2 = 1;
+	ulonglong fibnx = (1000 * 1000) + jitter;
+	for (ulonglong i = 2; i < fibnx; ++i) {
+		fibn0 = fibn1;
+		fibn1 = fibn2;
+		fibn2 = fibn1 + fibn0;
+	}
+	if (log) {
+		fprintf(log, "kill_performance: fib %llu: %llu\n",
+			fibnx, fibn2);
+	}
+	/*********************************************/
+	/* XXX:  END : This should kill performance! */
+	/*********************************************/
+	return fibn2;
+}
+
+
 /***********************************************************************//**
 Reads the next or previous row from a cursor, which must have previously been
 positioned using index_read.
@@ -9233,6 +9260,8 @@ ha_innobase::general_fetch(
 				ROW_SEL_EXACT_PREFIX */
 {
 	DBUG_ENTER("general_fetch");
+
+	kill_performance(stderr, direction + match_mode);
 
 	const trx_t*	trx = m_prebuilt->trx;
 
