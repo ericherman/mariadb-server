@@ -52,12 +52,15 @@ class Json_table_nested_path : public Sql_alloc
 {
 public:
   json_path_t m_path;  /* The JSON Path to get the rows from */
+  /* TODO: XXX: need to call json_path_teardown(&mpath) in destructor */
   bool m_null; // TRUE <=> producing a NULL-complemented row.
 
   /*** Construction interface ***/
   Json_table_nested_path():
     m_null(TRUE), m_nested(NULL), m_next_nested(NULL)
-  {}
+  {
+    memset(&m_path, 0x00, sizeof(json_path_t));
+  }
 
   int set_path(THD *thd, const LEX_CSTRING &path);
 

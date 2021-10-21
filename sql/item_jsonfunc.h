@@ -33,6 +33,10 @@ public:
   bool constant;
   bool parsed;
   json_path_step_t *cur_step;
+  json_path_with_flags()
+  {
+    memset(&p, 0x00, sizeof(json_path_t));
+  }
   void set_constant_flag(bool s_constant)
   {
     constant= s_constant;
@@ -624,7 +628,10 @@ protected:
 
 public:
   Item_func_json_search(THD *thd, List<Item> &list):
-    Item_json_str_multipath(thd, list) {}
+    Item_json_str_multipath(thd, list)
+  {
+    memset(&sav_path, 0x00, sizeof(json_path_t));
+  }
   LEX_CSTRING func_name_cstring() const override
   {
     static LEX_CSTRING name= {STRING_WITH_LEN("json_search") };

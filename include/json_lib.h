@@ -100,7 +100,9 @@ typedef struct st_json_path_step_t
 typedef struct st_json_path_t
 {
   json_string_t s;  /* The string to be parsed. */
-  json_path_step_t steps[JSON_DEPTH_LIMIT]; /* Steps of the path. */
+  json_path_step_t dyn_arr_init_steps[JSON_DEPTH_LIMIT];
+  DYNAMIC_ARRAY steps; /* Steps of the path. */
+  int steps_da_initialized;
   json_path_step_t *last_step; /* Points to the last step. */
 
   int mode_strict; /* TRUE if the path specified as 'strict' */
@@ -110,6 +112,9 @@ typedef struct st_json_path_t
 
 int json_path_setup(json_path_t *p,
                     CHARSET_INFO *i_cs, const uchar *str, const uchar *end);
+
+
+void json_path_teardown(json_path_t *p);
 
 
 /*
@@ -222,10 +227,14 @@ typedef struct st_json_engine_t
   int value_len; /* The length of the value. Does not count quotations for */
                  /* string constants. */
 
-  int stack[JSON_DEPTH_LIMIT]; /* Keeps the stack of nested JSON structures. */
+  int dyn_arr_init_stack[JSON_DEPTH_LIMIT];
+  DYNAMIC_ARRAY stack; /* Keeps the stack of nested JSON structures. */
   int stack_p;                 /* The 'stack' pointer. */
 } json_engine_t;
 
+void json_engine_setup(json_engine_t *j); /* initialize the stack */
+
+void json_engine_teardown(json_engine_t *j); /* clear (maybe free) the stack */
 
 int json_scan_start(json_engine_t *je,
                         CHARSET_INFO *i_cs, const uchar *str, const uchar *end);
@@ -357,20 +366,24 @@ int json_find_path(json_engine_t *je,
                    json_path_t *p, json_path_step_t **p_cur_step,
                    uint *array_counters);
 
-
+/* XXX: json_find_paths_t, json_find_paths_first, json_find_paths_next
+ * XXX: is this 100% unused code ? --eric.herman 2021-20-21 */
 typedef struct st_json_find_paths_t
 {
   uint n_paths;
   json_path_t *paths;
   uint cur_depth;
   uint *path_depths;
-  uint array_counters[JSON_DEPTH_LIMIT];
+  uint dyn_arr_init_array_counters[JSON_DEPTH_LIMIT];
+  DYNAMIC_ARRAY array_counters;
 } json_find_paths_t;
 
 
 int json_find_paths_first(json_engine_t *je, json_find_paths_t *state,
                           uint n_paths, json_path_t *paths, uint *path_depths);
 int json_find_paths_next(json_engine_t *je, json_find_paths_t *state);
+
+void json_find_paths_teardown(json_engine_t *je, json_find_paths_t *state);
 
 
 /*

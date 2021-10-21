@@ -18,6 +18,14 @@
 #include <m_ctype.h>
 #include "json_lib.h"
 
+#ifndef PSI_JSON
+#define PSI_JSON PSI_NOT_INSTRUMENTED
+#endif
+
+#ifndef JSON_MALLOC_FLAGS
+#define JSON_MALLOC_FLAGS MYF(MY_THREAD_SPECIFIC|MY_WME)
+#endif
+
 /*
   JSON escaping lets user specify UTF16 codes of characters.
   So we're going to need the UTF16 charset capabilities. Let's import
@@ -140,13 +148,13 @@ static int syntax_error(json_engine_t *j)
 static int mark_object(json_engine_t *j)
 {
   j->state= JST_OBJ_START;
-  if (++j->stack_p < JSON_DEPTH_LIMIT)
+  ++j->stack_p;
+  if (set_dynamic(j->stack, JST_OBJ_CONT, j->stack_p)) {
   {
-    j->stack[j->stack_p]= JST_OBJ_CONT;
-    return 0;
+    j->s.error= JE_DEPTH;
+    return 1;
   }
-  j->s.error= JE_DEPTH;
-  return 1;
+  return 0;
 }
 
 
@@ -156,13 +164,13 @@ static int read_obj(json_engine_t *j)
   j->state= JST_OBJ_START;
   j->value_type= JSON_VALUE_OBJECT;
   j->value= j->value_begin;
-  if (++j->stack_p < JSON_DEPTH_LIMIT)
+  ++j->stack_p;
+  if (set_dynamic(j->stack, JST_OBJ_CONT, j->stack_p)) {
   {
-    j->stack[j->stack_p]= JST_OBJ_CONT;
-    return 0;
+    j->s.error= JE_DEPTH;
+    return 1;
   }
-  j->s.error= JE_DEPTH;
-  return 1;
+  return 0;
 }
 
 
@@ -170,14 +178,13 @@ static int read_obj(json_engine_t *j)
 static int mark_array(json_engine_t *j)
 {
   j->state= JST_ARRAY_START;
-  if (++j->stack_p < JSON_DEPTH_LIMIT)
+  ++j->stack_p;
+  if (set_dynamic(j->stack, JST_ARRAY_CONT, j->stack_p)) {
   {
-    j->stack[j->stack_p]= JST_ARRAY_CONT;
-    j->value= j->value_begin;
-    return 0;
+    j->s.error= JE_DEPTH;
+    return 1;
   }
-  j->s.error= JE_DEPTH;
-  return 1;
+  return 0;
 }
 
 /* Read value of object. */
@@ -186,13 +193,13 @@ static int read_array(json_engine_t *j)
   j->state= JST_ARRAY_START;
   j->value_type= JSON_VALUE_ARRAY;
   j->value= j->value_begin;
-  if (++j->stack_p < JSON_DEPTH_LIMIT)
+  ++j->stack_p;
+  if (set_dynamic(j->stack, JST_ARRAY_CONT, j->stack_p)) {
   {
-    j->stack[j->stack_p]= JST_ARRAY_CONT;
-    return 0;
+    j->s.error= JE_DEPTH;
+    return 1;
   }
-  j->s.error= JE_DEPTH;
-  return 1;
+  return 0;
 }
 
 
@@ -894,6 +901,17 @@ static int struct_end_qb(json_engine_t *j)
 static int struct_end_cm(json_engine_t *j)
 { return json_actions[j->stack[j->stack_p]][C_COMMA](j); }
 
+void json_engine_setup(json_engine_t *j)
+{
+  init_dynamic_array2(PSI_JSON, j->stack, sizeof(int),
+		  j->dyn_arr_init_stack, JSON_DEPTH_LIMIT, JSON_DEPTH_LIMIT,
+		  JSON_MALLOC_FLAGS);
+}
+
+void json_engine_teardown(json_engine_t *j)
+{
+  delete_dynamic(j->stack);
+}
 
 int json_read_keyname_chr(json_engine_t *j)
 {
@@ -1112,6 +1130,14 @@ int json_path_setup(json_path_t *p,
   int c_len, t_next, state= PS_GO;
   enum json_path_step_types double_wildcard= JSON_PATH_KEY_NULL;
 
+  if (p->steps_da_initialized) {
+    delete_dynamic(p->steps);
+  }
+  init_dynamic_array2(PSI_JSON, p->steps, sizeof(json_path_step_t),
+		  p->dyn_arr_init_steps, JSON_DEPTH_LIMIT, JSON_DEPTH_LIMIT,
+		  JSON_MALLOC_FLAGS);
+  p->steps_da_initialized= 1;
+
   json_string_setup(&p->s, i_cs, str, end);
 
   p->steps[0].type= JSON_PATH_ARRAY_WILD;
@@ -1163,8 +1189,6 @@ int json_path_setup(json_path_t *p,
       /* fall through */
     case PS_KEY:
       p->last_step++;
-      if (p->last_step - p->steps >= JSON_DEPTH_LIMIT)
-        return p->s.error= JE_DEPTH;
       p->types_used|= p->last_step->type= JSON_PATH_KEY | double_wildcard;
       double_wildcard= JSON_PATH_KEY_NULL;
       /* fall through */
@@ -1177,8 +1201,6 @@ int json_path_setup(json_path_t *p,
       /* fall through */
     case PS_AR:
       p->last_step++;
-      if (p->last_step - p->steps >= JSON_DEPTH_LIMIT)
-        return p->s.error= JE_DEPTH;
       p->types_used|= p->last_step->type= JSON_PATH_ARRAY | double_wildcard;
       double_wildcard= JSON_PATH_KEY_NULL;
       p->last_step->n_item= 0;
@@ -1204,6 +1226,13 @@ int json_path_setup(json_path_t *p,
   } while (state != PS_OK);
 
   return double_wildcard ? (p->s.error= JE_SYN) : 0;
+}
+
+
+
+void json_path_teardown(json_path_t *p)
+{
+  delete_dynamic(p->steps);
 }
 
 
@@ -1398,6 +1427,11 @@ int json_find_paths_first(json_engine_t *je, json_find_paths_t *state,
   state->paths= paths;
   state->cur_depth= 0;
   state->path_depths= path_depths;
+
+  init_dynamic_array2(PSI_JSON, state->array_counters, sizeof(uint),
+		  state->dyn_arr_init_array_counters, JSON_DEPTH_LIMIT,
+		  JSON_DEPTH_LIMIT, JSON_MALLOC_FLAGS);
+
   return json_find_paths_next(je, state);
 }
 
@@ -1515,6 +1549,12 @@ int json_find_paths_next(json_engine_t *je, json_find_paths_t *state)
 
 exit:
   return je->s.error;
+}
+
+
+int json_find_paths_teardown(json_engine_t *je, json_find_paths_t *state)
+{
+  delete_dynamic(state->array_counters);
 }
 
 

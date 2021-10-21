@@ -114,6 +114,7 @@ static void
 test_path_parsing()
 {
   json_path_t p;
+  memset(&p, 0x00, sizeof(json_path_t));
   if (json_path_setup(&p, ci, s_e(p0)))
     return;
   ok(p.last_step - p.steps == 4 && 
@@ -123,6 +124,7 @@ test_path_parsing()
      p.steps[3].type == JSON_PATH_KEY_WILD &&
      p.steps[4].type == JSON_PATH_ARRAY_WILD,
      "path");
+  json_path_teardown(&p);
 }
 
 
@@ -152,22 +154,25 @@ test_search()
   {
     n_matches++;
     if (json_read_value(&je))
-      return;
+      goto test_search_end;
     if (json_value_scalar(&je))
     {
       scal_values++;
       if (json_scan_next(&je))
-        return;
+        goto test_search_end;
     }
     else
     {
       if (json_skip_level(&je) || json_scan_next(&je))
-        return;
+        goto test_search_end;
     }
 
   }
 
   ok(n_matches == 3, "search");
+
+test_search_end:
+  json_path_teardown(&p);
 }
 
 
