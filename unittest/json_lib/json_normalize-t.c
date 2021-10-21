@@ -188,6 +188,45 @@ test_json_normalize_nested_deep(void)
 }
 
 
+static void
+test_json_normalize_nested_deeper(void)
+{
+#ifdef JSON_DEPTH_LIMIT
+  const size_t deeper_depth= (2 + JSON_DEPTH_LIMIT);
+#else
+  const size_t deeper_depth= (2 + 32);
+#endif
+  const size_t size= 250;
+  char in[250];
+  char expected[250];
+  char buf[40];
+
+  memset(in, 0x00, size);
+  memset(expected, 0x00, size);
+
+  sprintf(in, "[ ");
+  sprintf(expected, "[");
+  for (size_t i= 0; i < deeper_depth; ++i) {
+    sprintf(buf, "\"0x%02zx\", [ ", i);
+    strcat(in, buf);
+    sprintf(buf, "\"0x%02zx\",[", i);
+    strcat(expected, buf);
+  }
+  sprintf(buf, "\"0x%02zx\" ", deeper_depth);
+  strcat(in, buf);
+  sprintf(buf, "\"0x%02zx\"", deeper_depth);
+  strcat(expected, buf);
+  for (size_t i= 0; i < deeper_depth; ++i) {
+    strcat(in, "] ");
+    strcat(expected, "]");
+  }
+  strcat(in, "]");
+  strcat(expected, "]");
+
+  check_json_normalize(in, expected);
+}
+
+
 /* a "friend" function */
 int
 json_normalize_number(DYNAMIC_STRING *out, const char *str, size_t str_len);
@@ -243,7 +282,7 @@ check_number_normalize(const char *in, const char *expected)
 int
 main(void)
 {
-  plan(88);
+  plan(90);
   diag("Testing json_normalization.");
 
   check_number_normalize("0", "0.0E0");
@@ -274,6 +313,7 @@ main(void)
   test_json_normalize_nested_objects();
   test_json_normalize_nested_arrays();
   test_json_normalize_nested_deep();
+  test_json_normalize_nested_deeper();
   test_json_normalize_non_utf8();
 
   return exit_status();
