@@ -363,21 +363,6 @@ int json_find_path(json_engine_t *je,
                    int *array_counters);
 
 
-typedef struct st_json_find_paths_t
-{
-  uint n_paths;
-  json_path_t *paths;
-  uint cur_depth;
-  uint *path_depths;
-  int array_counters[JSON_DEPTH_LIMIT];
-} json_find_paths_t;
-
-
-int json_find_paths_first(json_engine_t *je, json_find_paths_t *state,
-                          uint n_paths, json_path_t *paths, uint *path_depths);
-int json_find_paths_next(json_engine_t *je, json_find_paths_t *state);
-
-
 #define JSON_ERROR_OUT_OF_SPACE  (-1)
 #define JSON_ERROR_ILLEGAL_SYMBOL (-2)
 
