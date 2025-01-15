@@ -409,17 +409,40 @@ bool Json_schema_const::validate(const json_engine_t *je,
                                  const uchar *k_start,
                                  const uchar* k_end)
 {
-  json_engine_t curr_je;
-  curr_je= *je;
+  json_engine_t curr_je, temp_je, temp_je_2;
+  json_engine_init(&curr_je);
+  json_engine_init(&temp_je);
+  json_engine_init(&temp_je_2);
+
+  if (json_engine_copy(&curr_je, je))
+  {
+    json_engine_done(&curr_je);
+    json_engine_done(&temp_je);
+    json_engine_done(&temp_je_2);
+    return true;
+  }
+
   const char *start= (char*)curr_je.value;
   const char *end= (char*)curr_je.value+curr_je.value_len;
-  json_engine_t temp_je= *je;
-  json_engine_t temp_je_2;
+
+  if (json_engine_copy(&temp_je, je))
+  {
+    json_engine_done(&curr_je);
+    json_engine_done(&temp_je);
+    json_engine_done(&temp_je_2);
+    return true;
+  }
+
   String a_res("", 0, curr_je.s.cs);
   int err= 0;
 
   if (type != curr_je.value_type)
-   return true;
+  {
+    json_engine_done(&curr_je);
+    json_engine_done(&temp_je);
+    json_engine_done(&temp_je_2);
+    return true;
+  }
 
   if (curr_je.value_type <= JSON_VALUE_NUMBER)
   {
@@ -427,7 +450,10 @@ bool Json_schema_const::validate(const json_engine_t *je,
     {
       if (json_skip_level(&temp_je))
       {
-        curr_je= temp_je;
+        // json_engine_copy(&cur_je, &temp_je);
+        json_engine_done(&curr_je);
+        json_engine_done(&temp_je);
+        json_engine_done(&temp_je_2);
         return true;
       }
       end= (char*)temp_je.s.c_str;
@@ -441,12 +467,20 @@ bool Json_schema_const::validate(const json_engine_t *je,
     {
       if (json_read_value(&temp_je_2))
       {
-        curr_je= temp_je;
+        // json_engine_copy(&cur_je, &temp_je);
+        json_engine_done(&curr_je);
+        json_engine_done(&temp_je);
+        json_engine_done(&temp_je_2);
         return true;
       }
       json_get_normalized_string(&temp_je_2, &a_res, &err);
       if (err)
-       return true;
+      {
+        json_engine_done(&curr_je);
+        json_engine_done(&temp_je);
+        json_engine_done(&temp_je_2);
+        return true;
+      }
     }
     else
       a_res.append(val.ptr(), val.length(), temp_je.s.cs);
@@ -454,9 +488,20 @@ bool Json_schema_const::validate(const json_engine_t *je,
     if (a_res.length() == strlen(const_json_value) &&
         !strncmp((const char*)const_json_value, a_res.ptr(),
                   a_res.length()))
+    {
+      json_engine_done(&curr_je);
+      json_engine_done(&temp_je);
+      json_engine_done(&temp_je_2);
       return false;
+    }
+    json_engine_done(&curr_je);
+    json_engine_done(&temp_je);
+    json_engine_done(&temp_je_2);
     return true;
   }
+  json_engine_done(&curr_je);
+  json_engine_done(&temp_je);
+  json_engine_done(&temp_je_2);
   return false;
 }
 
@@ -468,6 +513,7 @@ bool Json_schema_const::handle_keyword(THD *thd, json_engine_t *je,
 {
   const char *start= (char*)je->value, *end= (char*)je->value+je->value_len;
   json_engine_t temp_je;
+  json_engine_init(&temp_je);
   String a_res("", 0, je->s.cs);
   int err;
 
@@ -476,7 +522,10 @@ bool Json_schema_const::handle_keyword(THD *thd, json_engine_t *je,
   if (!json_value_scalar(je))
   {
     if (json_skip_level(je))
+    {
+      json_engine_done(&temp_je);
       return true;
+    }
     end= (char*)je->s.c_str;
   }
 
@@ -487,10 +536,16 @@ bool Json_schema_const::handle_keyword(THD *thd, json_engine_t *je,
   if (je->value_type != JSON_VALUE_STRING)
   {
     if (json_read_value(&temp_je))
+    {
+      json_engine_done(&temp_je);
       return true;
+    }
     json_get_normalized_string(&temp_je, &a_res, &err);
     if (err)
+    {
+      json_engine_done(&temp_je);
       return true;
+    }
   }
   else
     a_res.append(val.ptr(), val.length(), je->s.cs);
@@ -498,11 +553,15 @@ bool Json_schema_const::handle_keyword(THD *thd, json_engine_t *je,
   this->const_json_value= (char*)alloc_root(thd->mem_root,
                                             a_res.length()+1);
   if (!const_json_value)
+  {
+    json_engine_done(&temp_je);
     return true;
+  }
 
   const_json_value[a_res.length()]= '\0';
   strncpy(const_json_value, (const char*)a_res.ptr(), a_res.length());
 
+  json_engine_done(&temp_je);
   return false;
 }
 
@@ -511,7 +570,12 @@ bool Json_schema_enum::validate(const json_engine_t *je,
                                 const uchar* k_end)
 {
   json_engine_t temp_je;
-  temp_je= *je;
+  json_engine_init(&temp_je);
+  if (json_engine_copy(&temp_je, je))
+  {
+    json_engine_done(&temp_je);
+    return true;
+  }
 
   String norm_str((char*)"",0, je->s.cs);
 
@@ -521,21 +585,36 @@ bool Json_schema_enum::validate(const json_engine_t *je,
   if (temp_je.value_type > JSON_VALUE_NUMBER)
   {
     if (!(enum_scalar & (1 << temp_je.value_type)))
+    {
+      json_engine_done(&temp_je);
       return true;
+    }
     else
+    {
+      json_engine_done(&temp_je);
       return false;
+    }
   }
   json_get_normalized_string(&temp_je, &a_res, &err);
   if (err)
+  {
+    json_engine_done(&temp_je);
     return true;
+  }
 
   norm_str.append((const char*)a_res.ptr(), a_res.length(), je->s.cs);
 
   if (my_hash_search(&this->enum_values, (const uchar*)(norm_str.ptr()),
                        strlen((const char*)(norm_str.ptr()))))
+  {
+    json_engine_done(&temp_je);
     return false;
+  }
   else
+  {
+    json_engine_done(&temp_je);
     return true;
+  }
 }
 
 bool Json_schema_enum::handle_keyword(THD *thd, json_engine_t *je,
@@ -942,24 +1021,39 @@ bool Json_schema_max_items::validate(const json_engine_t *je,
 {
   uint count= 0;
   json_engine_t curr_je;
+  json_engine_init(&curr_je);
 
-  curr_je= *je;
+  if (json_engine_copy(&curr_je, je))
+  {
+    json_engine_done(&curr_je);
+    return true;
+  }
 
   if (curr_je.value_type != JSON_VALUE_ARRAY)
+  {
+    json_engine_done(&curr_je);
     return false;
+  }
 
   int level= curr_je.stack_p;
   while(json_scan_next(&curr_je)==0 && level <= curr_je.stack_p)
   {
     if (json_read_value(&curr_je))
+    {
+      json_engine_done(&curr_je);
       return true;
+    }
     count++;
     if (!json_value_scalar(&curr_je))
     {
       if (json_skip_level(&curr_je))
+      {
+        json_engine_done(&curr_je);
         return true;
+      }
     }
   }
+  json_engine_done(&curr_je);
   return count > value ? true : false;
 }
 
@@ -996,24 +1090,39 @@ bool Json_schema_min_items::validate(const json_engine_t *je,
 {
   uint count= 0;
   json_engine_t  curr_je;
+  json_engine_init(&curr_je);
 
-  curr_je= *je;
+  if (json_engine_copy(&curr_je, je))
+  {
+    json_engine_done(&curr_je);
+    return true;
+  }
 
   if (curr_je.value_type != JSON_VALUE_ARRAY)
+  {
+    json_engine_done(&curr_je);
     return false;
+  }
 
   int level= curr_je.stack_p;
   while(json_scan_next(&curr_je)==0 && level <= curr_je.stack_p)
   {
     if (json_read_value(&curr_je))
+    {
+      json_engine_done(&curr_je);
       return true;
+    }
     count++;
     if (!json_value_scalar(&curr_je))
     {
       if (json_skip_level(&curr_je))
+      {
+        json_engine_done(&curr_je);
         return true;
+      }
     }
   }
+  json_engine_done(&curr_je);
   return count < value ? true : false;
 }
 
@@ -1105,24 +1214,39 @@ bool Json_schema_contains::validate(const json_engine_t *je,
                                     const uchar* k_end)
 {
   uint contains_count=0;
-  json_engine_t curr_je;  curr_je= *je;
+  json_engine_t curr_je;
+  json_engine_init(&curr_je);
+  if (json_engine_copy(&curr_je, je))
+  {
+    json_engine_done(&curr_je);
+    return true;
+  }
   int level= je->stack_p;
   bool validated= true;
 
   if (curr_je.value_type != JSON_VALUE_ARRAY)
+  {
+    json_engine_done(&curr_je);
     return false;
+  }
 
   while(json_scan_next(&curr_je)==0 && level <= curr_je.stack_p)
   {
     if (json_read_value(&curr_je))
+   {
+     json_engine_done(&curr_je);
      return true;
+   }
     validated= true;
     if (validate_schema_items(&curr_je, &contains))
       validated= false;
     if (!json_value_scalar(&curr_je))
     {
       if (json_skip_level(&curr_je))
+      {
+        json_engine_done(&curr_je);
         return true;
+      }
     }
     if (validated)
       contains_count++;
@@ -1132,8 +1256,12 @@ bool Json_schema_contains::validate(const json_engine_t *je,
                       contains_count>0) &&
       (min_contains ? contains_count >= min_contains->value :
                       contains_count>0))
+  {
+    json_engine_done(&curr_je);
     return false;
+  }
 
+  json_engine_done(&curr_je);
   return true;
 }
 
@@ -1198,10 +1326,20 @@ bool Json_schema_items::validate(const json_engine_t *je,
   */
   int level= je->stack_p, count=0;
   bool is_false= false;
-  json_engine_t curr_je= *je;
+  json_engine_t curr_je;
+
+  json_engine_init(&curr_je);
+  if (json_engine_copy(&curr_je, je))
+  {
+    json_engine_done(&curr_je);
+    return true;
+  }
 
   if (je->value_type != JSON_VALUE_ARRAY)
+  {
+    json_engine_done(&curr_je);
     return false;
+  }
 
   if (!allowed)
     is_false= true;
@@ -1209,12 +1347,19 @@ bool Json_schema_items::validate(const json_engine_t *je,
   while (json_scan_next(&curr_je)==0 && level <= curr_je.stack_p)
   {
     if (json_read_value(&curr_je))
+    {
+      json_engine_done(&curr_je);
       return true;
+    }
     count++;
     if (validate_schema_items(&curr_je, &items_schema))
+    {
+      json_engine_done(&curr_je);
       return true;
+    }
   }
 
+  json_engine_done(&curr_je);
   return is_false ? (!count ? false : true) : false;
 }
 
@@ -1223,42 +1368,68 @@ bool Json_schema_prefix_items::validate(const json_engine_t *je,
                                         const uchar* k_end)
 {
   int level= je->stack_p;
-  json_engine_t curr_je= *je;
+  json_engine_t curr_je;
+  json_engine_init(&curr_je);
+  if (json_engine_copy(&curr_je, je))
+  {
+    json_engine_done(&curr_je);
+    return true;
+  }
   List_iterator <List<Json_schema_keyword>> it1 (prefix_items);
   List<Json_schema_keyword> *curr_prefix;
 
   if (curr_je.value_type != JSON_VALUE_ARRAY)
+  {
+    json_engine_done(&curr_je);
     return false;
+  }
 
   while(curr_je.s.c_str < curr_je.s.str_end && json_scan_next(&curr_je)==0 &&
         curr_je.stack_p >= level)
   {
     if (json_read_value(&curr_je))
+    {
+      json_engine_done(&curr_je);
       return true;
+    }
     if (!(curr_prefix=it1++))
     {
       if (fall_back_on_alternate_schema(&curr_je))
+      {
+        json_engine_done(&curr_je);
         return true;
+      }
       else
       {
         if (!json_value_scalar(&curr_je))
         {
           if (json_skip_level(&curr_je))
+          {
+            json_engine_done(&curr_je);
             return true;
+          }
         }
       }
     }
     else
     {
       if (validate_schema_items(&curr_je, &(*curr_prefix)))
+      {
+        json_engine_done(&curr_je);
         return true;
+      }
       if (!json_value_scalar(&curr_je))
       {
         if (json_skip_level(&curr_je))
+        {
+          json_engine_done(&curr_je);
           return true;
+        }
       }
     }
   }
+
+  json_engine_done(&curr_je);
   return false;
 }
 
@@ -1319,15 +1490,27 @@ bool Json_schema_unique_items::validate(const json_engine_t *je,
 {
   HASH unique_items;
   List <char> norm_str_list;
-  json_engine_t curr_je= *je;
+  json_engine_t curr_je;
+  json_engine_init(&curr_je);
+  if (json_engine_copy(&curr_je, je))
+  {
+    json_engine_done(&curr_je);
+    return true;
+  }
   int res= true, level= curr_je.stack_p, scalar_val= 0;
 
   if (curr_je.value_type != JSON_VALUE_ARRAY)
+  {
+    json_engine_done(&curr_je);
     return false;
+  }
 
   if (my_hash_init(PSI_INSTRUMENT_ME, &unique_items, curr_je.s.cs,
                    1024, 0, 0, get_key_name, NULL, 0))
+  {
+    json_engine_done(&curr_je);
     return true;
+  }
 
   while(json_scan_next(&curr_je)==0 && level <= curr_je.stack_p)
   {
@@ -1383,6 +1566,7 @@ bool Json_schema_unique_items::validate(const json_engine_t *je,
     norm_str_list.empty();
   }
   my_hash_free(&unique_items);
+  json_engine_done(&curr_je);
   return res;
 }
 
@@ -1410,11 +1594,20 @@ bool Json_schema_max_prop::validate(const json_engine_t *je,
                                     const uchar* k_end)
 {
   uint properties_count= 0;
-  json_engine_t curr_je= *je;
+  json_engine_t curr_je;
+  json_engine_init(&curr_je);
+  if (json_engine_copy(&curr_je, je))
+  {
+    json_engine_done(&curr_je);
+    return false;
+  }
   int curr_level= je->stack_p;
 
   if (curr_je.value_type != JSON_VALUE_OBJECT)
+  {
+    json_engine_done(&curr_je);
     return false;
+  }
 
   while (json_scan_next(&curr_je)== 0 && je->stack_p >= curr_level)
   {
@@ -1423,17 +1616,25 @@ bool Json_schema_max_prop::validate(const json_engine_t *je,
       case JST_KEY:
       {
         if (json_read_value(&curr_je))
+        {
+          json_engine_done(&curr_je);
           return true;
+        }
+
         properties_count++;
 
         if (!json_value_scalar(&curr_je))
         {
           if (json_skip_level(&curr_je))
+          {
+            json_engine_done(&curr_je);
             return true;
+          }
         }
       }
     }
   }
+  json_engine_done(&curr_je);
   return properties_count > value ? true : false;
 }
 
@@ -1470,10 +1671,20 @@ bool Json_schema_min_prop::validate(const json_engine_t *je,
 {
   uint properties_count= 0;
   int curr_level= je->stack_p;
-  json_engine_t curr_je= *je;
+  json_engine_t curr_je;
+  json_engine_init(&curr_je);
+
+  if (json_engine_copy(&curr_je, je))
+  {
+    json_engine_done(&curr_je);
+    return true;
+  }
 
   if (curr_je.value_type != JSON_VALUE_OBJECT)
+  {
+    json_engine_done(&curr_je);
     return false;
+  }
 
   while (json_scan_next(&curr_je)== 0 && je->stack_p >= curr_level)
   {
@@ -1482,17 +1693,24 @@ bool Json_schema_min_prop::validate(const json_engine_t *je,
       case JST_KEY:
       {
         if (json_read_value(&curr_je))
+        {
+          json_engine_done(&curr_je);
           return true;
+        }
         properties_count++;
 
         if (!json_value_scalar(&curr_je))
         {
           if (json_skip_level(&curr_je))
+          {
+            json_engine_done(&curr_je);
             return true;
+          }
         }
       }
     }
   }
+  json_engine_done(&curr_je);
   return properties_count < value ? true : false;
 }
 
@@ -1527,7 +1745,14 @@ bool Json_schema_required::validate(const json_engine_t *je,
                                     const uchar *k_start,
                                     const uchar* k_end)
 {
-  json_engine_t curr_je= *je;
+  json_engine_t curr_je;
+  json_engine_init(&curr_je);
+  if (json_engine_copy(&curr_je, je))
+  {
+    json_engine_done(&curr_je);
+    return true;
+  }
+
   List<char> malloc_mem_list;
   HASH required;
   int res= true, curr_level= curr_je.stack_p;
@@ -1535,12 +1760,18 @@ bool Json_schema_required::validate(const json_engine_t *je,
   String *curr_str;
 
   if (curr_je.value_type != JSON_VALUE_OBJECT)
+  {
+    json_engine_done(&curr_je);
     return false;
+  }
 
   if(my_hash_init(PSI_INSTRUMENT_ME, &required,
                curr_je.s.cs, 1024, 0, 0, get_key_name,
                NULL, 0))
-      return true;
+  {
+    json_engine_done(&curr_je);
+    return true;
+  }
   while (json_scan_next(&curr_je)== 0 && curr_je.stack_p >= curr_level)
   {
     switch (curr_je.state)
@@ -1576,6 +1807,7 @@ bool Json_schema_required::validate(const json_engine_t *je,
   }
   res= false;
   error:
+  json_engine_done(&curr_je);
   if (!malloc_mem_list.is_empty())
   {
     List_iterator<char> it(malloc_mem_list);
@@ -1624,7 +1856,13 @@ bool Json_schema_dependent_required::validate(const json_engine_t *je,
                                           const uchar *k_start,
                                           const uchar* k_end)
 {
-  json_engine_t curr_je= *je;
+  json_engine_t curr_je;
+  json_engine_init(&curr_je);
+  if (json_engine_copy(&curr_je, je))
+  {
+    json_engine_done(&curr_je);
+    return true;
+  }
   HASH properties;
   bool res= true;
   int curr_level= curr_je.stack_p;
@@ -1633,12 +1871,18 @@ bool Json_schema_dependent_required::validate(const json_engine_t *je,
   st_dependent_keywords *curr_keyword= NULL;
 
   if (curr_je.value_type != JSON_VALUE_OBJECT)
+  {
+    json_engine_done(&curr_je);
     return false;
+  }
 
   if (my_hash_init(PSI_INSTRUMENT_ME, &properties,
                  curr_je.s.cs, 1024, 0, 0, get_key_name,
                  NULL, 0))
+  {
+    json_engine_done(&curr_je);
     return true;
+  }
 
   while (json_scan_next(&curr_je)== 0 && curr_je.stack_p >= curr_level)
   {
@@ -1689,6 +1933,7 @@ bool Json_schema_dependent_required::validate(const json_engine_t *je,
   res= false;
 
   error:
+  json_engine_done(&curr_je);
   my_hash_free(&properties);
   if (!malloc_mem_list.is_empty())
   {
@@ -1787,11 +2032,21 @@ bool Json_schema_property_names::validate(const json_engine_t *je,
                                           const uchar *k_start,
                                           const uchar* k_end)
 {
-  json_engine_t curr_je= *je;
+  json_engine_t curr_je;
+  json_engine_init(&curr_je);
+  if (json_engine_copy(&curr_je, je))
+  {
+    json_engine_done(&curr_je);
+    return true;
+  }
+
   int level= curr_je.stack_p;
 
   if (je->value_type != JSON_VALUE_OBJECT)
+  {
+    json_engine_done(&curr_je);
     return false;
+  }
 
   while (json_scan_next(&curr_je)==0 && level <= curr_je.stack_p)
   {
@@ -1807,11 +2062,17 @@ bool Json_schema_property_names::validate(const json_engine_t *je,
         } while (json_read_keyname_chr(&curr_je) == 0);
 
         if (json_read_value(&curr_je))
+        {
+          json_engine_done(&curr_je);
           return true;
+        }
         if (!json_value_scalar(&curr_je))
         {
           if (json_skip_level(&curr_je))
+          {
+            json_engine_done(&curr_je);
             return true;
+          }
         }
 
         List_iterator <Json_schema_keyword> it1 (property_names);
@@ -1819,12 +2080,16 @@ bool Json_schema_property_names::validate(const json_engine_t *je,
         while((curr_schema= it1++))
         {
           if (curr_schema->validate(&curr_je, k_start, k_end))
+          {
+            json_engine_done(&curr_je);
             return true;
+          }
         }
       }
     }
   }
 
+  json_engine_done(&curr_je);
   return false;
 }
 
@@ -1891,28 +2156,46 @@ bool Json_schema_properties::validate_as_alternate(const json_engine_t *je,
                                                    const uchar* k_end)
 {
   st_property *curr_property= NULL;
-  json_engine_t curr_je= *je;
+  json_engine_t curr_je;
+  json_engine_init(&curr_je);
+  if (json_engine_copy(&curr_je, je))
+  {
+    json_engine_done(&curr_je);
+    return true;
+  }
   if ((curr_property=
         (st_property*)my_hash_search(&properties,
                                 (const uchar*)k_start,
                                 (size_t)(k_end-k_start))))
   {
     if (validate_schema_items(&curr_je, curr_property->curr_schema))
+    {
+      json_engine_done(&curr_je);
       return true;
+    }
     if (!json_value_scalar(&curr_je))
     {
       if (json_skip_level(&curr_je))
+      {
+        json_engine_done(&curr_je);
         return true;
+      }
     }
   }
   else
   {
     if (alternate_schema && alternate_schema->validate_as_alternate(je, k_start, k_end))
     {
+    {
+      json_engine_done(&curr_je);
       return true;
     }
+    }
   }
+{
+  json_engine_done(&curr_je);
   return false;
+}
 }
 
 bool
@@ -1935,12 +2218,21 @@ bool Json_schema_unevaluated_properties::validate(const json_engine_t *je,
                                                   const uchar *k_start,
                                                   const uchar* k_end)
 {
-  json_engine_t curr_je= *je;
+  json_engine_t curr_je;
+  json_engine_init(&curr_je);
+  if (json_engine_copy(&curr_je, je))
+  {
+    json_engine_done(&curr_je);
+    return true;
+  }
   int level= curr_je.stack_p, count= 0;
   bool has_false= false;
 
   if (je->value_type != JSON_VALUE_OBJECT)
+  {
+    json_engine_done(&curr_je);
     return false;
+  }
 
   if (!allowed)
     has_false= true;
@@ -1948,11 +2240,18 @@ bool Json_schema_unevaluated_properties::validate(const json_engine_t *je,
   while (json_scan_next(&curr_je)==0 && level <= curr_je.stack_p)
   {
     if (json_read_value(&curr_je))
+    {
+      json_engine_done(&curr_je);
       return true;
+    }
     count++;
     if (validate_schema_items(&curr_je, &schema_list))
+    {
+      json_engine_done(&curr_je);
       return true;
+    }
   }
+  json_engine_done(&curr_je);
   return has_false ? (!count ? false: true) : false;
 }
 
@@ -1964,11 +2263,20 @@ bool Json_schema_additional_properties::validate(const json_engine_t *je,
                                                  const uchar *k_start,
                                                  const uchar* k_end)
 {
-  json_engine_t curr_je= *je;
+  json_engine_t curr_je;
+  json_engine_init(&curr_je);
+  if (json_engine_copy(&curr_je, je))
+  {
+    json_engine_done(&curr_je);
+    return true;
+  }
   int level= curr_je.stack_p;
 
   if (je->value_type != JSON_VALUE_OBJECT)
+  {
+    json_engine_done(&curr_je);
     return false;
+  }
 
   while (json_scan_next(&curr_je)==0 && level <= curr_je.stack_p)
   {
@@ -1976,12 +2284,19 @@ bool Json_schema_additional_properties::validate(const json_engine_t *je,
     {
       case JST_KEY:
         if (json_read_value(&curr_je))
+        {
+          json_engine_done(&curr_je);
           return true;
+        }
         if (validate_schema_items(&curr_je, &schema_list))
+       {
+         json_engine_done(&curr_je);
          return true;
+       }
       }
   }
 
+  json_engine_done(&curr_je);
   return false;
 }
 
@@ -2009,10 +2324,19 @@ bool Json_schema_unevaluated_items::validate(const json_engine_t *je,
   */
   int level= je->stack_p, count=0;
   bool is_false= false;
-  json_engine_t curr_je= *je;
+  json_engine_t curr_je;
+  json_engine_init(&curr_je);
+  if (json_engine_copy(&curr_je, je))
+  {
+    json_engine_done(&curr_je);
+    return true;
+  }
 
   if (je->value_type != JSON_VALUE_ARRAY)
+  {
+    json_engine_done(&curr_je);
     return false;
+  }
 
   if (!allowed)
     is_false= true;
@@ -2020,12 +2344,19 @@ bool Json_schema_unevaluated_items::validate(const json_engine_t *je,
   while (json_scan_next(&curr_je)==0 && level <= curr_je.stack_p)
   {
     if (json_read_value(&curr_je))
+    {
+      json_engine_done(&curr_je);
       return true;
+    }
     count++;
    if (validate_schema_items(&curr_je, &schema_list))
+   {
+     json_engine_done(&curr_je);
      return true;
+   }
   }
 
+  json_engine_done(&curr_je);
   return is_false ? (!count ? false : true) : false;
 }
 
@@ -2033,10 +2364,19 @@ bool Json_schema_properties::validate(const json_engine_t *je,
                                       const uchar *k_start,
                                       const uchar* k_end)
 {
-  json_engine_t curr_je= *je;
+  json_engine_t curr_je;
+  json_engine_init(&curr_je);
+  if (json_engine_copy(&curr_je, je))
+  {
+    json_engine_done(&curr_je);
+    return true;
+  }
 
   if (curr_je.value_type != JSON_VALUE_OBJECT)
+  {
+    json_engine_done(&curr_je);
     return false;
+  }
 
   int level= curr_je.stack_p;
   while (json_scan_next(&curr_je)==0 && level <= curr_je.stack_p)
@@ -2052,7 +2392,10 @@ bool Json_schema_properties::validate(const json_engine_t *je,
         } while (json_read_keyname_chr(&curr_je) == 0);
 
         if (json_read_value(&curr_je))
+        {
+          json_engine_done(&curr_je);
           return true;
+        }
 
         st_property *curr_property= NULL;
         if ((curr_property=
@@ -2061,22 +2404,32 @@ bool Json_schema_properties::validate(const json_engine_t *je,
                                                     (size_t)(k_end-k_start))))
         {
           if (validate_schema_items(&curr_je, curr_property->curr_schema))
+          {
+            json_engine_done(&curr_je);
             return true;
+          }
         }
         else
         {
           if (fall_back_on_alternate_schema(&curr_je, k_start, k_end))
+          {
+            json_engine_done(&curr_je);
             return true;
+          }
         }
         if (!json_value_scalar(&curr_je))
         {
           if (json_skip_level(&curr_je))
+          {
+            json_engine_done(&curr_je);
             return true;
+          }
         }
       }
     }
   }
 
+  json_engine_done(&curr_je);
   return false;
 }
 
@@ -2184,12 +2537,22 @@ bool Json_schema_pattern_properties::validate(const json_engine_t *je,
                                               const uchar *k_start,
                                               const uchar* k_end)
 {
-  json_engine_t curr_je= *je;
+  json_engine_t curr_je;
+  json_engine_init(&curr_je);
+  if (json_engine_copy(&curr_je, je))
+  {
+    json_engine_done(&curr_je);
+    return true;
+  }
+
   int level= je->stack_p;
   bool match_found= false;
 
   if (je->value_type != JSON_VALUE_OBJECT)
+  {
+    json_engine_done(&curr_je);
     return false;
+  }
 
   while (json_scan_next(&curr_je)==0 && level <= curr_je.stack_p)
   {
@@ -2207,7 +2570,10 @@ bool Json_schema_pattern_properties::validate(const json_engine_t *je,
                                      (size_t)(k_end-k_start), curr_je.s.cs);
 
         if (json_read_value(&curr_je))
+        {
+          json_engine_done(&curr_je);
           return true;
+        }
 
         List_iterator <st_pattern_to_property> it1 (pattern_properties);
         st_pattern_to_property *curr_pattern_property= NULL;
@@ -2215,24 +2581,37 @@ bool Json_schema_pattern_properties::validate(const json_engine_t *je,
         while ((curr_pattern_property= it1++))
         {
           if (curr_pattern_property->re.recompile(curr_pattern_property->pattern))
+          {
+            json_engine_done(&curr_je);
             return true;
+          }
           if (curr_pattern_property->re.exec(str, 0, 0))
+          {
+            json_engine_done(&curr_je);
             return true;
+          }
           if (curr_pattern_property->re.match())
           {
             match_found= true;
             if (validate_schema_items(&curr_je, curr_pattern_property->curr_schema))
+            {
+              json_engine_done(&curr_je);
               return true;
+            }
           }
         }
         if (!match_found)
         {
           if (fall_back_on_alternate_schema(&curr_je, k_start, k_end))
+          {
+            json_engine_done(&curr_je);
             return true;
+          }
         }
       }
     }
   }
+  json_engine_done(&curr_je);
   return false;
 }
 
@@ -2313,18 +2692,25 @@ bool Json_schema_logic::handle_keyword(THD *thd, json_engine_t *je,
   }
 
   int level= je->stack_p;
+  json_engine_t temp_je;
+  json_engine_init(&temp_je);
   while(json_scan_next(je)==0 && je->stack_p >= level)
   {
-    json_engine_t temp_je;
     char *begin, *end;
     int len;
 
     if (json_read_value(je))
+    {
+      json_engine_done(&temp_je);
       return true;
+    }
     begin= (char*)je->value;
 
     if (json_skip_level(je))
+    {
+      json_engine_done(&temp_je);
       return true;
+    }
 
     end= (char*)je->s.c_str;
     len= (int)(end-begin);
@@ -2335,14 +2721,21 @@ bool Json_schema_logic::handle_keyword(THD *thd, json_engine_t *je,
                         new (thd->mem_root) List<Json_schema_keyword>;
 
     if (!keyword_list)
+    {
+      json_engine_done(&temp_je);
       return true;
+    }
     if (create_object_and_handle_keyword(thd, &temp_je, keyword_list,
                                          all_keywords))
+    {
+      json_engine_done(&temp_je);
       return true;
+    }
 
     schema_items.push_back(keyword_list, thd->mem_root);
   }
 
+  json_engine_done(&temp_je);
   return false;
 }
 
@@ -2423,16 +2816,26 @@ bool Json_schema_keyword::validate_schema_items(const json_engine_t *je,
                                                 List<Json_schema_keyword>
                                                              *schema_items)
 {
-  json_engine_t curr_je= *je;
+  json_engine_t curr_je;
+  json_engine_init(&curr_je);
+  if (json_engine_copy(&curr_je, je))
+  {
+    json_engine_done(&curr_je);
+    return true;
+  }
   List_iterator<Json_schema_keyword> it1(*schema_items);
   Json_schema_keyword *curr_schema= NULL;
 
   while((curr_schema= it1++))
   {
     if (curr_schema->validate(&curr_je))
+    {
+      json_engine_done(&curr_je);
       return true;
+    }
   }
 
+  json_engine_done(&curr_je);
   return false;
 }
 
@@ -2549,10 +2952,19 @@ bool Json_schema_dependent_schemas::validate(const json_engine_t *je,
                                          const uchar *k_start,
                                          const uchar *k_end)
 {
-  json_engine_t curr_je= *je;
+  json_engine_t curr_je;
+  json_engine_init(&curr_je);
+  if (json_engine_copy(&curr_je, je))
+  {
+    json_engine_done(&curr_je);
+    return true;
+  }
 
   if (curr_je.value_type != JSON_VALUE_OBJECT)
+  {
+    json_engine_done(&curr_je);
     return false;
+  }
 
   int level= curr_je.stack_p;
   while (json_scan_next(&curr_je)==0 && level <= curr_je.stack_p)
@@ -2568,7 +2980,10 @@ bool Json_schema_dependent_schemas::validate(const json_engine_t *je,
         } while (json_read_keyname_chr(&curr_je) == 0);
 
         if (json_read_value(&curr_je))
+        {
+          json_engine_done(&curr_je);
           return true;
+        }
 
         st_property *curr_property= NULL;
         if ((curr_property=
@@ -2577,17 +2992,24 @@ bool Json_schema_dependent_schemas::validate(const json_engine_t *je,
                                                     (size_t)(k_end-k_start))))
         {
           if (validate_schema_items(je, curr_property->curr_schema))
+          {
+            json_engine_done(&curr_je);
             return true;
+          }
           if (!json_value_scalar(&curr_je))
           {
             if (json_skip_level(&curr_je))
+            {
+              json_engine_done(&curr_je);
               return true;
+            }
           }
         }
       }
     }
   }
 
+  json_engine_done(&curr_je);
   return false;
 }
 

@@ -16,14 +16,6 @@
 #include <my_global.h>
 #include <json_lib.h>
 
-#ifndef PSI_JSON
-#define PSI_JSON PSI_NOT_INSTRUMENTED
-#endif
-
-#ifndef JSON_MALLOC_FLAGS
-#define JSON_MALLOC_FLAGS MYF(MY_THREAD_SPECIFIC|MY_WME)
-#endif
-
 /*
 From the EXPIRED DRAFT JSON Canonical Form
 https://datatracker.ietf.org/doc/html/draft-staykov-hu-json-canonical-form-00
@@ -647,17 +639,30 @@ static int
 json_norm_parse(struct json_norm_value *root, json_engine_t *je)
 {
   size_t current;
-  struct json_norm_value *stack[JSON_DEPTH_LIMIT];
+  struct json_norm_value *initial_stack[JSON_DEPTH_LIMIT];
+  /* struct json_norm_value **stack= initial_stack; */
+  DYNAMIC_ARRAY stack;
   int err= 0;
   DYNAMIC_STRING key;
+  struct json_norm_value *val;
 
   err= init_dynamic_string(&key, NULL, 0, 0);
   if (err)
     goto json_norm_parse_end;
 
-  memset(stack, 0x00, sizeof(stack));
+  memset(initial_stack, 0x00, sizeof(initial_stack));
+  if (my_init_dynamic_array2(PSI_JSON, &stack, sizeof(struct json_norm_value *),
+                             (void *)&initial_stack, 0, 2 * JSON_DEPTH_LIMIT,
+                             JSON_MALLOC_FLAGS))
+    goto json_norm_parse_end;
+
   current= 0;
-  stack[current]= root;
+  err= set_dynamic(&stack, &root, current);
+  if (err)
+    goto json_norm_parse_end;
+
+  get_dynamic(&stack, &val, current);
+  DBUG_ASSERT(root == val);
 
   do {
     switch (je->state)
@@ -667,7 +672,8 @@ json_norm_parse(struct json_norm_value *root, json_engine_t *je)
       const uchar *key_start= je->s.c_str;
       const uchar *key_end;
 
-      DBUG_ASSERT(stack[current]->type == JSON_VALUE_OBJECT);
+      get_dynamic(&stack, &val, current);
+      DBUG_ASSERT(val->type == JSON_VALUE_OBJECT);
       do
       {
         key_end= je->s.c_str;
@@ -683,7 +689,8 @@ json_norm_parse(struct json_norm_value *root, json_engine_t *je)
       if (err)
         goto json_norm_parse_end;
 
-      err= json_norm_append_to_object(stack[current], &key, je);
+      get_dynamic(&stack, &val, current);
+      err= json_norm_append_to_object(val, &key, je);
       if (err)
         goto json_norm_parse_end;
 
@@ -692,25 +699,27 @@ json_norm_parse(struct json_norm_value *root, json_engine_t *je)
       {
         struct json_norm_kv *kv;
 
-        err= ((current + 1) == JSON_DEPTH_LIMIT);
+        kv= json_norm_object_get_last_element(&val->value.object);
+        val= &kv->value;
+        err= set_dynamic(&stack, &val, ++current);
         if (err)
           goto json_norm_parse_end;
-
-        kv= json_norm_object_get_last_element(&stack[current]->value.object);
-        stack[++current]= &kv->value;
       }
       break;
     }
     case JST_VALUE:
     {
-      struct json_norm_array *current_arr= &stack[current]->value.array;
+      struct json_norm_array *current_arr= NULL;
+
+      get_dynamic(&stack, &val, current);
+      DBUG_ASSERT(val->type == JSON_VALUE_ARRAY);
+      current_arr= &val->value.array;
+
       err= json_read_value(je);
       if (err)
         goto json_norm_parse_end;
 
-      DBUG_ASSERT(stack[current]->type == JSON_VALUE_ARRAY);
-
-      err= json_norm_append_to_array(stack[current], je);
+      err= json_norm_append_to_array(val, je);
       if (err)
         goto json_norm_parse_end;
 
@@ -718,11 +727,10 @@ json_norm_parse(struct json_norm_value *root, json_engine_t *je)
           je->value_type == JSON_VALUE_OBJECT)
       {
 
-        err= ((current + 1) == JSON_DEPTH_LIMIT);
+        val= json_norm_array_get_last_element(current_arr);
+        err= set_dynamic(&stack, &val, ++current);
         if (err)
           goto json_norm_parse_end;
-
-        stack[++current]= json_norm_array_get_last_element(current_arr);
       }
 
       break;
@@ -748,6 +756,7 @@ json_norm_parse(struct json_norm_value *root, json_engine_t *je)
 
 json_norm_parse_end:
   dynstr_free(&key);
+  delete_dynamic(&stack);
   return err;
 }
 
@@ -765,9 +774,14 @@ json_norm_build(struct json_norm_value *root,
   memset(root, 0x00, sizeof(struct json_norm_value));
   root->type= JSON_VALUE_UNINITIALIZED;
 
+  json_engine_init(&je);
+
   err= json_scan_start(&je, cs, (const uchar *)s, (const uchar *)(s + size));
   if (json_read_value(&je))
+  {
+    json_engine_done(&je);
     return err;
+  }
 
   err= json_norm_value_init(root, &je);
 
@@ -776,8 +790,13 @@ json_norm_build(struct json_norm_value *root,
   {
     err= json_norm_parse(root, &je);
     if (err)
+    {
+      json_engine_done(&je);
       return err;
+    }
   }
+
+  json_engine_done(&je);
   return err;
 }
 

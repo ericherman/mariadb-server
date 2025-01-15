@@ -42,10 +42,15 @@ static void parse_json(const uchar *j, struct st_parse_result *result)
 {
   json_engine_t je;
 
+  json_engine_init(&je);
+
   bzero(result, sizeof(*result));
 
   if (json_scan_start(&je, ci, s_e(j)))
+  {
+    json_engine_done(&je);
     return;
+  }
 
   do
   {
@@ -59,7 +64,10 @@ static void parse_json(const uchar *j, struct st_parse_result *result)
         result->keyname_csum^= je.s.c_next;
       }
       if (je.s.error)
+      {
+        json_engine_done(&je);
         return;
+      }
       break;
     case JST_VALUE:
       result->n_values++;
@@ -76,6 +84,7 @@ static void parse_json(const uchar *j, struct st_parse_result *result)
   } while (json_scan_next(&je) == 0);
 
   result->error= je.s.error;
+  json_engine_done(&je);
 }
 
 
@@ -114,6 +123,8 @@ static void
 test_path_parsing()
 {
   json_path_t p;
+  json_path_init(&p);
+
   if (json_path_setup(&p, ci, s_e(p0)))
     return;
   ok(p.last_step - p.steps == 4 &&
@@ -123,6 +134,8 @@ test_path_parsing()
      p.steps[3].type == JSON_PATH_KEY_WILD &&
      p.steps[4].type == JSON_PATH_ARRAY_WILD,
      "path");
+
+  json_path_done(&p);
 }
 
 
@@ -140,34 +153,40 @@ test_search()
   json_path_t p;
   json_path_step_t *cur_step;
   int n_matches, scal_values;
-  int array_counters[JSON_DEPTH_LIMIT];
+
+  json_engine_init(&je);
+  json_path_init(&p);
 
   if (json_scan_start(&je, ci, s_e(fj0)) ||
       json_path_setup(&p, ci, s_e(fp0)))
-    return;
+    goto test_search_end;
 
   cur_step= p.steps;
   n_matches= scal_values= 0;
-  while (json_find_path(&je, &p, &cur_step, array_counters) == 0)
+  while (json_find_path(&je, &p, &cur_step) == 0)
   {
     n_matches++;
     if (json_read_value(&je))
-      return;
+      goto test_search_end;
     if (json_value_scalar(&je))
     {
       scal_values++;
       if (json_scan_next(&je))
-        return;
+        goto test_search_end;
     }
     else
     {
       if (json_skip_level(&je) || json_scan_next(&je))
-        return;
+        goto test_search_end;
     }
 
   }
 
   ok(n_matches == 3, "search");
+
+test_search_end:
+  json_engine_done(&je);
+  json_path_done(&p);
 }
 
 

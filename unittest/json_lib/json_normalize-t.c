@@ -24,13 +24,15 @@ static void
 check_json_normalize(const char *in, const char *expected)
 {
   int err;
+  size_t len;
   DYNAMIC_STRING result;
 
   CHARSET_INFO *cs= &my_charset_utf8mb4_general_ci;
 
   init_dynamic_string(&result, NULL, 0, 0);
 
-  err= json_normalize(&result, in, strlen(in), cs);
+  len= strlen(in);
+  err= json_normalize(&result, in, len, cs);
 
   ok(err == 0, "normalize err: %d", err);
 
@@ -188,6 +190,81 @@ test_json_normalize_nested_deep(void)
 }
 
 
+static void
+test_json_normalize_nested_very_deep(void)
+{
+  size_t i, j, depth;
+  int err;
+  DYNAMIC_STRING pretty;
+  DYNAMIC_STRING expected;
+  char entry[255];
+  char spaces[127];
+
+  depth= (JSON_DEPTH_LIMIT + 2);
+  assert(sizeof(spaces) > depth);
+
+  init_dynamic_string(&expected, NULL, 0, 0);
+  init_dynamic_string(&pretty, NULL, 0, 0);
+
+  err= dynstr_append(&expected, "{");
+  ok(err == 0, "dynstr_append %d", __LINE__);
+
+  err= dynstr_append(&pretty, "{\n");
+  ok(err == 0, "dynstr_append %d", __LINE__);
+
+  for (i= 1; i <= depth; ++i)
+  {
+    snprintf(entry, sizeof(entry), "\"k_%08zx\":{", i);
+    err= dynstr_append(&expected, entry);
+    ok(err == 0, "dynstr_append i:%zu, %d", i, __LINE__);
+
+    memset(spaces, 0x0, sizeof(spaces));
+    for (j= 0; j < i; ++j)
+      spaces[j]= ' ';
+    snprintf(entry, sizeof(entry), "%s\"k_%08zx\": {\n", spaces, i);
+    err= dynstr_append(&pretty, entry);
+    ok(err == 0, "dynstr_append %zu, %zu", i, j);
+
+  }
+
+  err= dynstr_append(&expected, "\"foo\":\"bar\"");
+  ok(err == 0, "dynstr_append %d", __LINE__);
+
+  memset(spaces, 0x0, sizeof(spaces));
+  for (j= 0; j < (depth+1); ++j)
+    spaces[j]= ' ';
+  err= dynstr_append(&pretty, spaces);
+  ok(err == 0, "dynstr_append %d", __LINE__);
+  err= dynstr_append(&pretty, "\"foo\": \"bar\"\n");
+  ok(err == 0, "dynstr_append %d", __LINE__);
+
+  for (i= depth; i >= 1; --i)
+  {
+    err= dynstr_append(&expected, "}");
+    ok(err == 0, "dynstr_append %zu }", i);
+
+    memset(spaces, 0x0, sizeof(spaces));
+    for (j= 0; j < i; ++j)
+      spaces[j]= ' ';
+    err= dynstr_append(&pretty, spaces);
+    ok(err == 0, "dynstr_append %zu %d", i, __LINE__);
+    err= dynstr_append(&pretty, "}\n");
+    ok(err == 0, "dynstr_append %zu %d", i, __LINE__);
+  }
+
+  err= dynstr_append(&expected, "}");
+  ok(err == 0, "dynstr_append %d", __LINE__);
+
+  err= dynstr_append(&pretty, "}\n");
+  ok(err == 0, "dynstr_append %d", __LINE__);
+
+  check_json_normalize(pretty.str, expected.str);
+
+  dynstr_free(&pretty);
+  dynstr_free(&expected);
+}
+
+
 /* a "friend" function */
 int
 json_normalize_number(DYNAMIC_STRING *out, const char *str, size_t str_len);
@@ -245,7 +322,7 @@ main(int argc, char** argv)
 {
   MY_INIT(argv[0]);
 
-  plan(88);
+  plan(267);
   diag("Testing json_normalization.");
 
   check_number_normalize("0", "0.0E0");
@@ -276,6 +353,7 @@ main(int argc, char** argv)
   test_json_normalize_nested_objects();
   test_json_normalize_nested_arrays();
   test_json_normalize_nested_deep();
+  test_json_normalize_nested_very_deep();
   test_json_normalize_non_utf8();
 
   my_end(MY_CHECK_ERROR);

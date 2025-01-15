@@ -3433,18 +3433,35 @@ bool Gis_geometry_collection::init_from_json(json_engine_t *je, bool er_on_3D,
 
   while (json_scan_next(je) == 0 && je->state != JST_ARRAY_END)
   {
-    json_engine_t sav_je= *je;
+    json_engine_t sav_je;
+    json_engine_init(&sav_je);
+    if (json_engine_copy(&sav_je, je))
+    {
+      json_engine_done(&sav_je);
+      return TRUE;
+    }
 
     DBUG_ASSERT(je->state == JST_VALUE);
 
     if (!(g= create_from_json(&buffer, je, er_on_3D, wkb)))
+    {
+      json_engine_done(&sav_je);
       return TRUE;
+    }
 
-    *je= sav_je;
-    if (json_skip_array_item(je))
+    if (json_engine_copy(je, &sav_je))
+    {
+      json_engine_done(&sav_je);
       return TRUE;
+    }
+    if (json_skip_array_item(je))
+    {
+      json_engine_done(&sav_je);
+      return TRUE;
+    }
 
     n_objects++;
+    json_engine_done(&sav_je);
   }
 
   wkb->write_at_position(no_pos, n_objects);

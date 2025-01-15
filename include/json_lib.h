@@ -9,6 +9,14 @@ extern "C" {
 
 #define JSON_DEPTH_LIMIT 32
 
+#ifndef PSI_JSON
+#define PSI_JSON PSI_NOT_INSTRUMENTED
+#endif
+
+#ifndef JSON_MALLOC_FLAGS
+#define JSON_MALLOC_FLAGS MYF(MY_THREAD_SPECIFIC|MY_WME)
+#endif
+
 /*
   When error happens, the c_next of the JSON engine contains the
   character that caused the error, and the c_str is the position
@@ -104,12 +112,31 @@ typedef struct st_json_path_step_t
 typedef struct st_json_path_t
 {
   json_string_t s;  /* The string to be parsed. */
-  json_path_step_t steps[JSON_DEPTH_LIMIT]; /* Steps of the path. */
+  json_path_step_t initial_steps[JSON_DEPTH_LIMIT];
+  json_path_step_t *steps; /* Steps of the path. */
+  size_t steps_len;
   json_path_step_t *last_step; /* Points to the last step. */
 
   int mode_strict; /* TRUE if the path specified as 'strict' */
   enum json_path_step_types types_used; /* The '|' of all step's 'type'-s */
 } json_path_t;
+
+#define json_path_init(p) do { \
+  memset(p, 0x00, sizeof(json_path_t)); \
+  (*p).steps= (*p).initial_steps; \
+  (*p).steps_len= JSON_DEPTH_LIMIT; \
+  (*p).last_step= (*p).steps; \
+} while (0)
+
+
+#define json_path_done(p) do { \
+  if ((*p).steps != (*p).initial_steps) \
+     my_free((*p).steps); \
+  json_path_init(p); \
+} while (0)
+
+
+int json_path_copy(json_path_t *dest, const json_path_t *src);
 
 
 int json_path_setup(json_path_t *p,
@@ -226,10 +253,30 @@ typedef struct st_json_engine_t
   int value_len; /* The length of the value. Does not count quotations for */
                  /* string constants. */
 
-  int stack[JSON_DEPTH_LIMIT]; /* Keeps the stack of nested JSON structures. */
+  int initial_stack[JSON_DEPTH_LIMIT];
+  int *stack; /* Keeps the stack of nested JSON structures. */
+  size_t stack_max;
   int stack_p;                 /* The 'stack' pointer. */
   volatile uchar *killed_ptr;
 } json_engine_t;
+
+
+#define json_engine_init(je) do { \
+  memset(je, 0x00, sizeof(json_engine_t)); \
+  (*je).stack= (*je).initial_stack; \
+  (*je).stack_max= JSON_DEPTH_LIMIT; \
+  (*je).stack_p= 0; \
+} while (0)
+
+
+#define json_engine_done(je) do { \
+  if ((*je).stack != (*je).initial_stack) \
+     my_free((*je).stack); \
+  json_engine_init(je); \
+} while (0)
+
+
+int json_engine_copy(json_engine_t *dest, const json_engine_t *src);
 
 
 int json_scan_start(json_engine_t *je,
@@ -350,8 +397,6 @@ int json_skip_level_and_count(json_engine_t *j, int *n_items_skipped);
   initialized with the JSON string, and the json_path_t with the JSON path
   appropriately. The 'p_cur_step' should point at the first
   step of the path.
-  The 'array_counters' is the array of JSON_DEPTH_LIMIT size.
-  It stores the array counters of the parsed JSON.
   If function returns 0, it means it found the match. The position of
   the match is je->s.c_str. Then we can call the json_find_path()
   with same engine/path/p_cur_step to get the next match.
@@ -359,8 +404,7 @@ int json_skip_level_and_count(json_engine_t *j, int *n_items_skipped);
   Check je->s.error to see if there was an error in JSON.
 */
 int json_find_path(json_engine_t *je,
-                   json_path_t *p, json_path_step_t **p_cur_step,
-                   int *array_counters);
+                   json_path_t *p, json_path_step_t **p_cur_step);
 
 
 #define JSON_ERROR_OUT_OF_SPACE  (-1)
@@ -413,9 +457,6 @@ int json_get_path_start(json_engine_t *je, CHARSET_INFO *i_cs,
 
 
 int json_get_path_next(json_engine_t *je, json_path_t *p);
-
-int json_path_compare(const json_path_t *a, const json_path_t *b,
-                      enum json_value_types vt, const int* array_size_counter);
 
 int json_valid(const char *js, size_t js_len, CHARSET_INFO *cs);
 

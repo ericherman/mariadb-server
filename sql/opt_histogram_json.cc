@@ -752,6 +752,7 @@ bool Histogram_json_hb::parse(MEM_ROOT *mem_root, const char *db_name,
   bool end_assigned;
   DBUG_ENTER("Histogram_json_hb::parse");
 
+  json_engine_init(&je);
   json_scan_start(&je, &my_charset_utf8mb4_bin,
                   (const uchar*)hist_data,
                   (const uchar*)hist_data+hist_data_len);
@@ -801,7 +802,10 @@ bool Histogram_json_hb::parse(MEM_ROOT *mem_root, const char *db_name,
     {
       // Some unknown member. Skip it.
       if (json_skip_key(&je))
+      {
+        json_engine_done(&je);
         return 1;
+      }
     }
   }
 
@@ -821,6 +825,7 @@ bool Histogram_json_hb::parse(MEM_ROOT *mem_root, const char *db_name,
     goto err;
   }
 
+  json_engine_done(&je);
   DBUG_RETURN(false); // Ok
 err:
   THD *thd= current_thd;
@@ -833,6 +838,7 @@ err:
                   db_name, table_name, err,
                   (je.s.c_str - (const uchar*)hist_data));
 
+  json_engine_done(&je);
   DBUG_RETURN(true);
 }
 

@@ -329,7 +329,7 @@ handle_new_nested:
   while (!json_get_path_next(&m_engine, &m_cur_path))
   {
     if (json_path_compare(&m_path, &m_cur_path, m_engine.value_type,
-                          NULL))
+                          NULL, 0))
       continue;
     /* path found. */
     ++m_ordinality_counter;
@@ -539,8 +539,8 @@ int ha_json_table::fill_column_values(THD *thd, uchar * buf, uchar *pos)
       case Json_table_column::EXISTS_PATH:
       {
         json_engine_t je;
+        json_engine_init(&je);
         json_path_step_t *cur_step;
-        int array_counters[JSON_DEPTH_LIMIT];
         int not_found;
         const uchar* node_start;
         const uchar* node_end;
@@ -565,7 +565,7 @@ int ha_json_table::fill_column_values(THD *thd, uchar * buf, uchar *pos)
         json_scan_start(&je, m_js->charset(), node_start, node_end);
 
         cur_step= jc->m_path.steps;
-        not_found= json_find_path(&je, &jc->m_path, &cur_step, array_counters) ||
+        not_found= json_find_path(&je, &jc->m_path, &cur_step) ||
                    json_read_value(&je);
 
         if (jc->m_column_type == Json_table_column::EXISTS_PATH)
@@ -607,8 +607,7 @@ int ha_json_table::fill_column_values(THD *thd, uchar * buf, uchar *pos)
                     (JSON_PATH_WILD | JSON_PATH_DOUBLE_WILD |
                      JSON_PATH_ARRAY_RANGE) &&
                   (json_scan_next(&je) ||
-                   !json_find_path(&je, &jc->m_path, &cur_step,
-                                   array_counters)))
+                   !json_find_path(&je, &jc->m_path, &cur_step)))
               {
                 error= jc->m_on_error.respond(jc, *f,
                                               ER_JSON_TABLE_MULTIPLE_MATCHES);
@@ -616,6 +615,7 @@ int ha_json_table::fill_column_values(THD *thd, uchar * buf, uchar *pos)
             }
           }
         }
+        json_engine_done(&je);
         break;
       }
       };

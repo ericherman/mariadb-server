@@ -57,7 +57,18 @@ public:
   /*** Construction interface ***/
   Json_table_nested_path():
     m_null(TRUE), m_nested(NULL), m_next_nested(NULL)
-  {}
+  {
+    json_engine_init(&m_engine);
+    json_path_init(&m_path);
+    json_path_init(&m_cur_path);
+  }
+
+  ~Json_table_nested_path(void)
+  {
+    json_engine_done(&m_engine);
+    json_path_done(&m_path);
+    json_path_done(&m_cur_path);
+  }
 
   int set_path(THD *thd, const LEX_CSTRING &path);
 
@@ -167,6 +178,11 @@ public:
   {
     m_on_error.m_response= RESPONSE_NOT_SPECIFIED;
     m_on_empty.m_response= RESPONSE_NOT_SPECIFIED;
+    json_path_init(&m_path);
+  }
+  ~Json_table_column(void)
+  {
+    json_path_done(&m_path);
   }
   int print(THD *tnd, Field **f, String *str);
 };

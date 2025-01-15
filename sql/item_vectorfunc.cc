@@ -200,6 +200,7 @@ String *Item_func_vec_fromtext::val_str(String *buf)
   if ((null_value= !value))
     return nullptr;
 
+  json_engine_init(&je);
   buf->length(0);
   buf->set_charset(&my_charset_bin);
   CHARSET_INFO *cs= value->charset();
@@ -249,6 +250,8 @@ String *Item_func_vec_fromtext::val_str(String *buf)
   if (!end_ok)
     goto error_format;
 
+  json_engine_done(&je);
+
   if (Type_handler_vector::is_valid(buf->ptr(), buf->length()))
     return buf;
 
@@ -265,12 +268,14 @@ error_format:
     push_warning_printf(current_thd, Sql_condition::WARN_LEVEL_WARN,
                         ER_VECTOR_FORMAT_INVALID, ER(ER_VECTOR_FORMAT_INVALID),
                         position, value->c_ptr_safe());
+    json_engine_done(&je);
     return nullptr;
   }
 
 error:
   report_json_error_ex(value->ptr(), &je, func_name(),
                        0, Sql_condition::WARN_LEVEL_WARN);
+  json_engine_done(&je);
   null_value= true;
   return nullptr;
 }

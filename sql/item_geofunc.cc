@@ -122,6 +122,8 @@ String *Item_func_geometry_from_json::val_str(String *str)
   if ((null_value= args[0]->null_value))
     return 0;
 
+  json_engine_init(&je);
+
   if (arg_count > 1 && !args[1]->null_value)
   {
     options= args[1]->val_int();
@@ -131,6 +133,7 @@ String *Item_func_geometry_from_json::val_str(String *str)
       my_error(ER_WRONG_VALUE_FOR_TYPE, MYF(0),
                "option", sv->c_ptr_safe(), "ST_GeomFromGeoJSON");
       null_value= 1;
+      json_engine_done(&je);
       return 0;
     }
   }
@@ -141,7 +144,10 @@ String *Item_func_geometry_from_json::val_str(String *str)
   str->set_charset(&my_charset_bin);
   str->length(0);
   if (str->reserve(SRID_SIZE, 512))
+  {
+    json_engine_done(&je);
     return 0;
+  }
   str->q_append(srid);
 
   json_scan_start(&je, js->charset(), (const uchar *) js->ptr(),
@@ -171,8 +177,11 @@ String *Item_func_geometry_from_json::val_str(String *str)
     default:
       report_json_error_ex(js->ptr(), &je, func_name(), 0,
                            Sql_condition::WARN_LEVEL_WARN);
+      json_engine_done(&je);
       return NULL;
     }
+
+    json_engine_done(&je);
 
     if (code)
     {

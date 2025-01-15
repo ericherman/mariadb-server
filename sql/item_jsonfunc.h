@@ -27,6 +27,10 @@
 #include "sql_type_json.h"
 #include "json_schema.h"
 
+int json_path_compare(const json_path_t *a, const json_path_t *b,
+                      enum json_value_types vt,
+                      DYNAMIC_ARRAY *array_sizes, size_t as_offset);
+
 class json_path_with_flags
 {
 public:
@@ -34,6 +38,19 @@ public:
   bool constant;
   bool parsed;
   json_path_step_t *cur_step;
+
+
+  json_path_with_flags(void)
+  {
+    json_path_init(&p);
+  }
+
+
+  ~json_path_with_flags(void)
+  {
+    json_path_done(&p);
+  }
+
   void set_constant_flag(bool s_constant)
   {
     constant= s_constant;
@@ -54,12 +71,17 @@ class Json_engine_scan: public json_engine_t
 public:
   Json_engine_scan(CHARSET_INFO *i_cs, const uchar *str, const uchar *end)
   {
+    json_engine_init(this);
     json_scan_start(this, i_cs, str, end);
   }
   Json_engine_scan(const String &str)
    :Json_engine_scan(str.charset(), (const uchar *) str.ptr(),
                                     (const uchar *) str.end())
   { }
+  ~Json_engine_scan()
+  {
+    json_engine_done(this);
+  }
   bool check_and_get_value_scalar(String *res, int *error);
   bool check_and_get_value_complex(String *res, int *error,
                                   json_value_types cur_value_type=
@@ -663,7 +685,16 @@ protected:
 
 public:
   Item_func_json_search(THD *thd, List<Item> &list):
-    Item_json_str_multipath(thd, list) {}
+    Item_json_str_multipath(thd, list)
+  {
+    json_path_init(&sav_path);
+  }
+
+  ~Item_func_json_search(void)
+  {
+    json_path_done(&sav_path);
+  }
+
   LEX_CSTRING func_name_cstring() const override
   {
     static LEX_CSTRING name= {STRING_WITH_LEN("json_search") };
